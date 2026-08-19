@@ -1,0 +1,1449 @@
+/*!
+ * dsh-token-dashboard — browser half (self-contained bundle)
+ *
+ * A collapsible floating widget for the DSH web GUI. It polls the server side
+ * (`GET /token-dashboard/api`) and renders token totals, cache-hit rate, context
+ * occupancy and per-turn usage trends. It deliberately depends on NOTHING else
+ * in the client module table (no React, no slots, no theme kit): a single
+ * classic <script>-style factory whose only browser dependency is `fetch`.
+ *
+ * The widget is draggable (pointer events), remembers its collapsed state and
+ * position in localStorage, pauses polling while the tab is hidden, and is
+ * fully removed again when the plugin fiber is disposed (HMR refresh safe).
+ */
+window.__ModuleLoader__.load({
+	id: "dsh-token-dashboard",
+	factory: (require) => {
+		var module = { exports: {} };
+		var exports = module.exports;
+		Object.defineProperty(exports, Symbol.toStringTag, { value: "Module" });
+
+		//#region styles (injected once; owned by this plugin for HMR bookkeeping)
+		// A small SVG icon set inlined as background-mask URLs. They render at the
+		// current font color so a single `mask` + `background: currentColor` pair
+		// gives us tinted, anti-aliased glyphs without bundling extra assets.
+		var ICONS = {
+			in: "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><path d='M9.5 1.5l3.5 3.5H10v2h2.5l-3 3-1.06-1.06L10.94 8 8.5 5.56 9.5 4.5l3 3V3.5h-3V1.5zm-7 13h11v-2h-11v2z'/></svg>",
+			out: "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><path d='M6.5 14.5L3 11l3.5-3.5L8 9 5.06 11.94 7.5 14.5l-3 3V14h3v-.5zm-1-9V3h-2L0 0v-.5l3 3h-1V2z' transform='='translate(3,1)'/></svg>",
+			cr: "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><path d='M8 1a7 7 0 1 0 7 7h-2a5 5 0 1 1-5-5V1zm6 .5L13 2l-3.5 3.5L8 4v2l1.5-1.5L13 8l1.5-1.5L13 5v-.5h2V1.5h-1z'/></svg>",
+			cw: "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><path d='M2 4a4 4 0 0 1 4-4v2a2 2 0 0 0-2 2H2zm0 8a4 4 0 0 0 4 4v-2a2 2 0 0 1-2-2H2zm12-8a4 4 0 0 0-4-4v2a2 2 0 0 1 2 2h2zm0 8a4 4 0 0 1-4 4v-2a2 2 0 0 0 2-2h2zM4 8a2 2 0 1 1 4 0 2 2 0 0 1-4 0z'/></svg>",
+			hit: "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><path d='M8 1a7 7 0 1 0 7 7h-2a5 5 0 1 1-5-5c.55 0 1.08.09 1.59.25L8.84 1.4A7.05 7.05 0 0 0 8 1zm4.5 1.5L8 6l-1-1L13.5 1l-1 1.5z'/></svg>",
+			ctx: "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><path d='M8 1a7 7 0 1 0 0 14A7 7 0 0 0 8 1zm0 2a5 5 0 0 1 5 5h-2a3 3 0 0 0-3-3V3z'/></svg>",
+			calls: "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><path d='M1 13h2V7H1v6zm4 0h2V3H5v10zm4 0h2V5H9v8zm4 0h2V9h-2v4z'/></svg>",
+			chevron: "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><path d='M4 6l4 4 4-4z'/></svg>",
+			reset: "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><path d='M8 3a5 5 0 1 1-4.546 2.914l-1.061 1.06A7 7 0 1 0 8 1v2zm5-2v3h-3V2h1.586L11.5 1.086l.707.707L11.5 2.5H13z'/></svg>",
+			refresh: "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><path d='M8 3a5 5 0 1 0 4.546 2.914.5.5 0 0 1 .908-.417A6 6 0 1 1 8 2z'/><path d='M8 4.466V.534a.25.25 0 0 1 .41-.192l2.36 1.966c.12.1.12.284 0 .384L8.41 4.658A.25.25 0 0 1 8 4.466z'/></svg>",
+		};
+		var ICON_DATA_URI = function (svg) {
+			return "url(\"data:image/svg+xml;utf8," + svg.replace(/"/g, "'") + "\")";
+		};
+
+		var CSS = [
+			// ── design tokens ─────────────────────────────────────────────────
+			":host,dsh-token-dashboard{",
+			"  --tdb-font: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'PingFang SC', 'Microsoft YaHei', sans-serif;",
+			"  --tdb-mono: ui-monospace, SFMono-Regular, 'JetBrains Mono', Menlo, Consolas, monospace;",
+			"  --tdb-radius-sm: 6px;",
+			"  --tdb-radius-md: 10px;",
+			"  --tdb-radius-lg: 14px;",
+			"  --tdb-pad-x: 14px;",
+			"  --tdb-pad-y: 12px;",
+			"  --tdb-gap: 10px;",
+			// dark theme (default — system-color-scheme light flips below)
+			"  --tdb-bg: rgba(22, 22, 28, .82);",
+			"  --tdb-bg-elev: rgba(255, 255, 255, .045);",
+			"  --tdb-bg-cell: rgba(255, 255, 255, .04);",
+			"  --tdb-bg-cell-hover: rgba(255, 255, 255, .07);",
+			"  --tdb-bg-chart: rgba(255, 255, 255, .03);",
+			"  --tdb-border: rgba(255, 255, 255, .08);",
+			"  --tdb-border-strong: rgba(255, 255, 255, .14);",
+			"  --tdb-fg: #e9eaee;",
+			"  --tdb-fg-muted: rgba(233, 234, 238, .55);",
+			"  --tdb-fg-faint: rgba(233, 234, 238, .35);",
+			"  --tdb-shadow: 0 10px 32px rgba(0, 0, 0, .35), 0 2px 6px rgba(0, 0, 0, .25);",
+			"  --tdb-accent-in: #7aa2ff;",
+			"  --tdb-accent-out: #b8a5ff;",
+			"  --tdb-accent-cr: #3fb950;",
+			"  --tdb-accent-cw: #d29922;",
+			"  --tdb-accent-hit: #3fb950;",
+			"  --tdb-accent-ctx: #f778ba;",
+			"  --tdb-accent-calls: #56d4dd;",
+			"  --tdb-accent-ok: #3fb950;",
+			"  --tdb-accent-warn: #d29922;",
+			"  --tdb-accent-err: #f85149;",
+			"}",
+			"@media (prefers-color-scheme: light) {",
+			"  dsh-token-dashboard {",
+			"    --tdb-bg: rgba(252, 252, 254, .86);",
+			"    --tdb-bg-elev: rgba(0, 0, 0, .025);",
+			"    --tdb-bg-cell: rgba(0, 0, 0, .03);",
+			"    --tdb-bg-cell-hover: rgba(0, 0, 0, .055);",
+			"    --tdb-bg-chart: rgba(0, 0, 0, .02);",
+			"    --tdb-border: rgba(0, 0, 0, .08);",
+			"    --tdb-border-strong: rgba(0, 0, 0, .14);",
+			"    --tdb-fg: #1c1c20;",
+			"    --tdb-fg-muted: rgba(28, 28, 32, .55);",
+			"    --tdb-fg-faint: rgba(28, 28, 32, .32);",
+			"    --tdb-shadow: 0 10px 32px rgba(15, 18, 35, .12), 0 2px 6px rgba(15, 18, 35, .06);",
+			"  }",
+			"}",
+			// ── root container ─────────────────────────────────────────────────
+			// `position: fixed` takes the element out of any ancestor flex/grid flow, so the
+			// panel can never be stretched to the full viewport (the "sticks to bottom /
+			// grows the page" symptom). `width/height: max-content` keeps the box at exactly
+			// its content size, and `pointer-events: none` lets clicks pass through the
+			// element entirely — only the panel child (which re-enables pointer events)
+			// is interactive, so no invisible region blocks the DSH UI underneath.
+			"dsh-token-dashboard{",
+			"  all: initial; display: block; position: fixed;",
+			"  right: 16px; bottom: 16px; z-index: 2147483000;",
+			"  width: max-content; height: max-content; max-width: 90vw; max-height: 90vh;",
+			"  pointer-events: none;",
+			"  color-scheme: light dark; font-family: var(--tdb-font); font-size: 12px; line-height: 1.5;",
+			"  color: var(--tdb-fg); user-select: none; -webkit-user-select: none;",
+			"  -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale;",
+			"}",
+			"dsh-token-dashboard *{{ box-sizing: border-box; margin: 0; padding: 0; }}",
+			// ── panel chrome ──────────────────────────────────────────────────
+			"dsh-token-dashboard .tdb-panel{",
+			"  pointer-events: auto;",
+			"  min-width: 360px; max-width: 480px; width: 440px;",
+			"  border: 1px solid var(--tdb-border); border-radius: var(--tdb-radius-md);",
+			"  background: var(--tdb-bg); backdrop-filter: blur(20px) saturate(1.4); -webkit-backdrop-filter: blur(20px) saturate(1.4);",
+			"  box-shadow: var(--tdb-shadow); overflow: hidden;",
+			"  transition: border-color .15s ease, box-shadow .2s ease;",
+			"}",
+			"dsh-token-dashboard .tdb-panel:hover{ border-color: var(--tdb-border-strong); }",
+			// ── header ────────────────────────────────────────────────────────
+			"dsh-token-dashboard .tdb-head{",
+			"  display: flex; align-items: center; gap: 10px;",
+			"  padding: 10px 12px; cursor: grab; user-select: none;",
+			"  border-bottom: 1px solid var(--tdb-border); background: var(--tdb-bg-elev);",
+			"}",
+			"dsh-token-dashboard .tdb-head:active{ cursor: grabbing; }",
+			"dsh-token-dashboard .tdb-title{",
+			"  font-weight: 600; font-size: 13px; letter-spacing: .2px;",
+			"  display: flex; align-items: center; gap: 8px; white-space: nowrap; flex: 0 0 auto;",
+			"}",
+			"dsh-token-dashboard .tdb-dot{",
+			"  width: 8px; height: 8px; border-radius: 50%; background: var(--tdb-accent-cr); flex: none",
+			"  box-shadow: 0 0 8px var(--tdb-accent-cr); transition: background .3s ease, box-shadow .3s ease;",
+			"}",
+			"dsh-token-dashboard .tdb-dot.idle{ background: var(--tdb-fg-faint); box-shadow: none; }",
+			// collapsed summary in header
+			"dsh-token-dashboard .tdb-summary{",
+			"  flex: 1; text-align: right;",
+			"  font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;",
+			"  display: flex; gap: 10px; align-items: center; justify-content: flex-end;",
+			"  font-size: 12px;",
+			"}",
+			"dsh-token-dashboard .tdb-summary .tdb-s-chip{",
+			"  display: inline-flex; align-items: baseline; gap: 3px; padding: 1px 7px;",
+			"  border-radius: 999px; background: var(--tdb-bg-cell);",
+			"  border: 1px solid var(--tdb-border); color: var(--tdb-fg-muted);",
+			"  font-size: 11px;",
+			"}",
+			"dsh-token-dashboard .tdb-summary .tdb-s-chip b{",
+			"  color: var(--tdb-fg); font-weight: 600; font-size: 12px;",
+			"}",
+			"dsh-token-dashboard .tdb-summary .tdb-s-hit{ border-color: transparent; background: rgba(63, 185, 80, .12); color: var(--tdb-accent-cr); }",
+			"dsh-token-dashboard .tdb-summary .tdb-s-hit b{ color: var(--tdb-accent-cr); }",
+			"dsh-token-dashboard .tdb-summary .tdb-s-ctx{ border-color: transparent; background: rgba(247, 120, 186, .10); color: var(--tdb-accent-ctx); }",
+			"dsh-token-dashboard .tdb-summary .tdb-s-ctx b{ color: var(--tdb-accent-ctx); }",
+			// icon-style buttons
+			"dsh-token-dashboard .tdb-btns{ display: flex; gap: 4px; flex: none; }",
+			"dsh-token-dashboard .tdb-btn{",
+			"  all: unset; cursor: pointer; width: 24px; height: 24px; border-radius: var(--tdb-radius-sm);",
+			"  display: inline-flex; align-items: center; justify-content: center; color: var(--tdb-fg-muted);",
+			"  transition: background .12s ease, color .12s ease, transform .15s ease;",
+			"}",
+			"dsh-token-dashboard .tdb-btn:hover{ background: var(--tdb-bg-cell-hover); color: var(--tdb-fg); }",
+			"dsh-token-dashboard .tdb-btn:active{ transform: scale(.92); }",
+			"dsh-token-dashboard .tdb-btn::before{",
+			"  content: ''; width: 14px; height: 14px; display: block;",
+			"  background: currentColor; -webkit-mask-position: center; mask-position: center;",
+			"  -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat; -webkit-mask-size: contain; mask-size: contain;",
+			"}",
+			"dsh-token-dashboard .tdb-btn.tdb-toggle::before{",
+			"  -webkit-mask-image: " + ICON_DATA_URI(ICONS.chevron) + "; mask-image: " + ICON_DATA_URI(ICONS.chevron) + ";",
+			"  transition: transform .2s ease;",
+			"}",
+			"dsh-token-dashboard .tdb-btn.tdb-refresh::before{",
+			"  -webkit-mask-image: " + ICON_DATA_URI(ICONS.refresh) + "; mask-image: " + ICON_DATA_URI(ICONS.refresh) + ";",
+			"}",
+			"@keyframes tdb-spin{ to { transform: rotate(360deg); } }",
+			"dsh-token-dashboard .tdb-btn.tdb-refresh.loading::before{ animation: tdb-spin .7s linear infinite; }",
+			"dsh-token-dashboard[aria-collapsed='true'] .tdb-toggle::before{ transform: rotate(-90deg); }",
+			// body
+			"dsh-token-dashboard .tdb-body[hidden]{ display: none !important; }",
+			"dsh-token-dashboard .tdb-body{",
+			"  padding: var(--tdb-pad-y) var(--tdb-pad-x);",
+			"  display: flex; flex-direction: column; gap: var(--tdb-gap);",
+			"  max-height: min(60vh, 520px); overflow-y: auto;",
+			"  scrollbar-width: thin; scrollbar-color: var(--tdb-border-strong) transparent;",
+			"}",
+			"dsh-token-dashboard .tdb-body::-webkit-scrollbar{ width: 6px; }",
+			"dsh-token-dashboard .tdb-body::-webkit-scrollbar-thumb{ background: var(--tdb-border-strong); border-radius: 3px; }",
+			// totals grid
+			"dsh-token-dashboard .tdb-grid{ display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }",
+			// the API-call counter is a full-width row under the 3-column totals grid
+			"dsh-token-dashboard .tdb-grid .tdb-c-calls{",
+			"  grid-column: 1 / -1;",
+			"  flex-direction: row; align-items: baseline; justify-content: space-between; gap: 8px;",
+			"}",
+			"dsh-token-dashboard .tdb-grid .tdb-c-calls span{ font-size: 10px; }",
+			// time-window filter (segmented control above the totals grid)
+			"dsh-token-dashboard .tdb-range{",
+			"  display: flex; align-items: center; gap: 4px;",
+			"  background: var(--tdb-bg-cell); border: 1px solid var(--tdb-border); border-radius: var(--tdb-radius-sm);",
+			"  padding: 2px; flex: none; align-self: flex-start;",
+			"}",
+			"dsh-token-dashboard .tdb-range button{",
+			"  all: unset; cursor: pointer; padding: 2px 9px; border-radius: 4px;",
+			"  font-size: 11px; color: var(--tdb-fg-muted); white-space: nowrap; line-height: 1.4;",
+			"  transition: background .12s ease, color .12s ease;",
+			"}",
+			"dsh-token-dashboard .tdb-range button:hover{ color: var(--tdb-fg); }",
+			"dsh-token-dashboard .tdb-range button.active{",
+			"  background: var(--tdb-fg); color: var(--tdb-bg); font-weight: 600;",
+			"}",
+			// totals grid
+			"dsh-token-dashboard .tdb-cell{",
+			"  background: var(--tdb-bg-cell); border-radius: var(--tdb-radius-sm);",
+			"  padding: 8px 10px; display: flex; flex-direction: column; gap: 2px;",
+			"  border-left: 2px solid var(--tdb-border);",
+			"  transition: background .15s ease, border-color .15s ease, transform .15s ease;",
+			"}",
+			"dsh-token-dashboard .tdb-cell:hover{ background: var(--tdb-bg-cell-hover); }",
+			"dsh-token-dashboard .tdb-cell b{",
+			"  font-family: var(--tdb-mono); font-size: 16px; font-weight: 600;",
+			"  font-variant-numeric: tabular-nums; letter-spacing: -0.2px;",
+			"  color: var(--tdb-fg); white-space: nowrap; line-height: 1.2;",
+			"}",
+			"dsh-token-dashboard .tdb-cell span{",
+			"  font-size: 10.5px; color: var(--tdb-fg-muted);",
+			"  display: inline-flex; align-items: center; gap: 4px;",
+			"  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;",
+			"}",
+			"dsh-token-dashboard .tdb-cell .tdb-i{",
+			"  width: 10px; height: 10px; flex: none; display: inline-block;",
+			"  background: currentColor; -webkit-mask-position: center; mask-position: center;",
+			"  -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat;",
+			"  -webkit-mask-size: contain; mask-size: contain; opacity: .8;",
+			"}",
+			"dsh-token-dashboard .tdb-cell.tdb-c-in{ border-left-color: var(--tdb-accent-in); }",
+			"dsh-token-dashboard .tdb-cell.tdb-c-in .tdb-i{ -webkit-mask-image: " + ICON_DATA_URI(ICONS.in) + "; mask-image: " + ICON_DATA_URI(ICONS.in) + "; color: var(--tdb-accent-in); }",
+			"dsh-token-dashboard .tdb-cell.tdb-c-out{ border-left-color: var(--tdb-accent-out); }",
+			"dsh-token-dashboard .tdb-cell.tdb-c-out .tdb-i{ -webkit-mask-image: " + ICON_DATA_URI(ICONS.out) + "; mask-image: " + ICON_DATA_URI(ICONS.out) + "; color: var(--tdb-accent-out); }",
+			"dsh-token-dashboard .tdb-cell.tdb-c-cr{ border-left-color: var(--tdb-accent-cr); }",
+			"dsh-token-dashboard .tdb-cell.tdb-c-cr .tdb-i{ -webkit-mask-image: " + ICON_DATA_URI(ICONS.cr) + "; mask-image: " + ICON_DATA_URI(ICONS.cr) + "; color: var(--tdb-accent-cr); }",
+			"dsh-token-dashboard .tdb-cell.tdb-c-cw{ border-left-color: var(--tdb-accent-cw); }",
+			"dsh-token-dashboard .tdb-cell.tdb-c-cw .tdb-i{ -webkit-mask-image: " + ICON_DATA_URI(ICONS.cw) + "; mask-image: " + ICON_DATA_URI(ICONS.cw) + "; color: var(--tdb-accent-cw); }",
+			"dsh-token-dashboard .tdb-cell.tdb-c-hit{ border-left-color: var(--tdb-accent-hit); }",
+			"dsh-token-dashboard .tdb-cell.tdb-c-hit .tdb-i{ -webkit-mask-image: " + ICON_DATA_URI(ICONS.hit) + "; mask-image: " + ICON_DATA_URI(ICONS.hit) + "; color: var(--tdb-accent-hit); }",
+			"dsh-token-dashboard .tdb-cell.tdb-c-ctx{ border-left-color: var(--tdb-accent-ctx); }",
+			"dsh-token-dashboard .tdb-cell.tdb-c-ctx .tdb-i{ -webkit-mask-image: " + ICON_DATA_URI(ICONS.ctx) + "; mask-image: " + ICON_DATA_URI(ICONS.ctx) + "; color: var(--tdb-accent-ctx); }",
+			"dsh-token-dashboard .tdb-cell.tdb-c-calls{ border-left-color: var(--tdb-accent-calls); }",
+			"dsh-token-dashboard .tdb-cell.tdb-c-calls .tdb-i{ -webkit-mask-image: " + ICON_DATA_URI(ICONS.calls) + "; mask-image: " + ICON_DATA_URI(ICONS.calls) + "; color: var(--tdb-accent-calls); }",
+			"dsh-token-dashboard .tdb-cell.tdb-c-calls b{ color: var(--tdb-accent-calls); }",
+			// chart metric picker (segmented control inside a chart label row)
+			"dsh-token-dashboard .tdb-mpick{ display: inline-flex; align-items: center; gap: 2px; }",
+			"dsh-token-dashboard .tdb-mpick button{",
+			"  all: unset; cursor: pointer; padding: 1px 7px; border-radius: 4px;",
+			"  font-size: 10px; color: var(--tdb-fg-muted); white-space: nowrap; line-height: 1.5;",
+			"  text-transform: none; letter-spacing: 0;",
+			"  transition: background .12s ease, color .12s ease;",
+			"}",
+			"dsh-token-dashboard .tdb-mpick button:hover{ color: var(--tdb-fg); background: var(--tdb-bg-cell-hover); }",
+			"dsh-token-dashboard .tdb-mpick button.active{ background: var(--tdb-fg); color: var(--tdb-bg); font-weight: 600; }",
+			// charts
+			"dsh-token-dashboard .tdb-chart{",
+			"  display: flex; flex-direction: column; gap: 6px;",
+			"  background: var(--tdb-bg-chart); border-radius: var(--tdb-radius-sm);",
+			"  padding: 10px 10px 8px;",
+			"}",
+			"dsh-token-dashboard .tdb-clabel{",
+			"  font-size: 10.5px; color: var(--tdb-fg-muted);",
+			"  display: flex; justify-content: space-between; align-items: baseline; gap: 6px;",
+			"  letter-spacing: .3px; text-transform: uppercase;",
+			"}",
+			"dsh-token-dashboard .tdb-clabel .tdb-c-legend { font-family: var(--tdb-mono); text-transform: none; letter-spacing: 0; opacity: .8; }",
+			"dsh-token-dashboard .tdb-chart-wrap{ position: relative; }",
+			"dsh-token-dashboard svg.tdb-svg{",
+			"  display: block; width: 100%; height: 56px; border-radius: 6px;",
+			"  background: var(--tdb-bg-elev);",
+			"}",
+			"dsh-token-dashboard .tdb-empty{ text-align: center; color: var(--tdb-fg-faint); padding: 18px 0; font-size: 11.5px; }",
+			"dsh-token-dashboard .tdb-tip{",
+			"  position: absolute; top: 0; pointer-events: none;",
+			"  background: var(--tdb-bg); border: 1px solid var(--tdb-border-strong);",
+			"  border-radius: var(--tdb-radius-sm); padding: 6px 8px; font-size: 11px;",
+			"  color: var(--tdb-fg); font-variant-numeric: tabular-nums; line-height: 1.4;",
+			"  box-shadow: 0 4px 12px rgba(0, 0, 0, .25);",
+			"  opacity: 0; transition: opacity .12s ease; z-index: 2;",
+			"  max-width: 200px;",
+			"}",
+			"dsh-token-dashboard .tdb-tip.show{ opacity: 1; }",
+			"dsh-token-dashboard .tdb-tip b{ color: var(--tdb-fg); font-weight: 600; margin-right: 4px; }",
+			"dsh-token-dashboard .tdb-tip .tdb-tip-time { color: var(--tdb-fg-muted); font-size: 10px; display: block; }",
+			"dsh-token-dashboard svg.tdb-svg .tdb-cursor{ stroke: var(--tdb-fg-muted); stroke-width: 1; stroke-dasharray: 2 2; opacity: 0; transition: opacity .12s ease; }",
+			"dsh-token-dashboard svg.tdb-svg .tdb-cursor.show{ opacity: .5; }",
+			// footer
+			"dsh-token-dashboard .tdb-selrow{ display: flex; flex: none; }",
+			"dsh-token-dashboard .tdb-tabs{",
+			"  display: flex; gap: 4px; flex: none; align-self: flex-start;",
+			"  background: var(--tdb-bg-cell); border: 1px solid var(--tdb-border); border-radius: var(--tdb-radius-sm);",
+			"  padding: 2px;",
+			"}",
+			"dsh-token-dashboard .tdb-tabs button{",
+			"  all: unset; cursor: pointer; padding: 2px 12px; border-radius: 4px;",
+			"  font-size: 11px; color: var(--tdb-fg-muted); white-space: nowrap; line-height: 1.4;",
+			"  transition: background .12s ease, color .12s ease;",
+			"}",
+			"dsh-token-dashboard .tdb-tabs button:hover{ color: var(--tdb-fg); }",
+			"dsh-token-dashboard .tdb-tabs button.active{ background: var(--tdb-fg); color: var(--tdb-bg); font-weight: 600; }",
+			"dsh-token-dashboard .tdb-pane{ display: flex; flex-direction: column; gap: var(--tdb-gap); }",
+			"dsh-token-dashboard .tdb-pane[hidden]{ display: none !important; }",
+			// model pane (per-model consumption cards)
+			"dsh-token-dashboard .tdb-mlist{ display: flex; flex-direction: column; gap: 8px; }",
+			"dsh-token-dashboard .tdb-mcard{",
+			"  background: var(--tdb-bg-cell); border: 1px solid var(--tdb-border); border-radius: var(--tdb-radius-sm);",
+			"  padding: 8px 10px 7px; display: flex; flex-direction: column; gap: 6px;",
+			"}",
+			"dsh-token-dashboard .tdb-mtop{ display: flex; align-items: baseline; gap: 8px; min-width: 0; }",
+			"dsh-token-dashboard .tdb-mname{",
+			"  font-family: var(--tdb-mono); font-size: 12.5px; font-weight: 600; color: var(--tdb-fg);",
+			"  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;",
+			"}",
+			"dsh-token-dashboard .tdb-mprov{",
+			"  font-size: 10px; color: var(--tdb-fg-faint); flex: 1; min-width: 0;",
+			"  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;",
+			"}",
+			"dsh-token-dashboard .tdb-mpct{ font-family: var(--tdb-mono); font-size: 12px; color: var(--tdb-accent-in); white-space: nowrap; }",
+			"dsh-token-dashboard .tdb-mgrid{ display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; }",
+			"dsh-token-dashboard .tdb-mgrid .tdb-cell{ padding: 6px 8px; }",
+			"dsh-token-dashboard .tdb-mgrid .tdb-cell b{ font-size: 13px; }",
+			"dsh-token-dashboard .tdb-mgrid .tdb-mtot{",
+			"  grid-column: 1 / -1; border-left-color: var(--tdb-accent-ctx);",
+			"  flex-direction: row; align-items: baseline; justify-content: space-between; gap: 8px;",
+			"}",
+			"dsh-token-dashboard .tdb-mgrid .tdb-mtot b{ font-size: 14px; color: var(--tdb-accent-ctx); }",
+			"dsh-token-dashboard .tdb-mgrid .tdb-mtot span{ font-size: 10px; }",
+			"dsh-token-dashboard .tdb-mbar{ height: 3px; background: var(--tdb-bg-chart); border-radius: 2px; overflow: hidden; }",
+			"dsh-token-dashboard .tdb-mbar i{",
+			"  display: block; height: 100%; background: linear-gradient(90deg, var(--tdb-accent-in), var(--tdb-accent-out));",
+			"  border-radius: 2px;",
+			"}",
+			// DeepSeek balance pane
+			"dsh-token-dashboard .tdb-ds-note{",
+			"  font-size: 11px; color: var(--tdb-fg-muted); padding: 10px 8px;",
+			"  border: 1px dashed var(--tdb-border-strong); border-radius: var(--tdb-radius-sm);",
+			"  background: var(--tdb-bg-chart); line-height: 1.5;",
+			"}",
+			"dsh-token-dashboard .tdb-ds-note.err{ color: var(--tdb-accent-err); border-color: var(--tdb-accent-err); }",
+			"dsh-token-dashboard .tdb-ds-note.ok{ color: var(--tdb-accent-ok); border-color: color-mix(in srgb, var(--tdb-accent-ok) 45%, transparent); }",
+			"dsh-token-dashboard .tdb-ds-meta{ font-size: 10.5px; color: var(--tdb-fg-faint); text-align: right; }",
+			"dsh-token-dashboard .tdb-mlist .tdb-empty{ padding: 22px 0; }",
+			"dsh-token-dashboard .tdb-selrow .tdb-select{",
+			"  flex: 1; min-width: 0; background: var(--tdb-bg-cell); color: var(--tdb-fg);",
+			"  border: 1px solid var(--tdb-border); border-radius: var(--tdb-radius-sm);",
+			"  font-size: 10.5px; padding: 3px 6px; cursor: pointer;",
+			"  font-variant-numeric: tabular-nums;",
+			"}",
+			"dsh-token-dashboard .tdb-selrow .tdb-select:hover{ background: var(--tdb-bg-cell-hover); }",
+			"dsh-token-dashboard .tdb-selrow .tdb-select option{ background: var(--tdb-bg); color: var(--tdb-fg); }",
+			"dsh-token-dashboard .tdb-foot{",
+			"  display: flex; align-items: center; gap: 8px; font-size: 10.5px; color: var(--tdb-fg-muted);",
+			"  border-top: 1px solid var(--tdb-border); padding-top: 10px; margin-top: 2px; flex-wrap: wrap;",
+			"}",
+			"dsh-token-dashboard .tdb-status{",
+			"  flex: none; padding: 1px 7px; border-radius: 999px; font-size: 10px; letter-spacing: .2px;",
+			"  border: 1px solid currentColor; background: color-mix(in srgb, currentColor 10%, transparent);",
+			"}",
+			"dsh-token-dashboard .tdb-status-pending{ color: var(--tdb-accent-warn); }",
+			"dsh-token-dashboard .tdb-status-ok{ color: var(--tdb-accent-ok); }",
+			"dsh-token-dashboard .tdb-status-err{ color: var(--tdb-accent-err); }",
+			"dsh-token-dashboard .tdb-empty-state{ text-align: center; color: var(--tdb-fg-faint); padding: 18px 4px; font-size: 12px; }",
+			"dsh-token-dashboard .tdb-empty-state b{ display: block; color: var(--tdb-fg); font-size: 13px; margin-bottom: 4px; }",
+			"@keyframes tdb-fadein{ from { opacity: 0; transform: translateY(2px); } to { opacity: 1; transform: translateY(0); } }",
+			"dsh-token-dashboard .tdb-body:not([hidden]) .tdb-grid, dsh-token-dashboard .tdb-body:not([hidden]) .tdb-chart, dsh-token-dashboard .tdb-body:not([hidden]) .tdb-foot{ animation: tdb-fadein .2s ease; }",
+		].join("");
+		if (typeof document !== "undefined" && document.querySelector("style[data-plugin-css=\"dsh-token-dashboard/panel.css\"]") === null) {
+			var tag = document.createElement("style");
+			tag.dataset.plugin = "dsh-token-dashboard";
+			tag.dataset.pluginCss = "dsh-token-dashboard/panel.css";
+			tag.textContent = CSS;
+			document.head.appendChild(tag);
+		}
+		//#endregion
+
+		//#region helpers
+		/** Escape HTML metacharacters in text (defensive; all data is numeric anyway). */
+		function esc(value) {
+			return String(value).replace(/[&<>"']/g, function (c) {
+				return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+			});
+		}
+		/** Compact token formatting: 1.2K / 3.4M / 517. */
+		function fmt(n) {
+			var v = typeof n === "number" && Number.isFinite(n) ? n : 0;
+			var abs = Math.abs(v);
+			var sign = v < 0 ? "-" : "";
+			if (abs >= 1e6) return sign + (abs / 1e6).toFixed(2).replace(/\.?0+$/, "") + "M";
+			if (abs >= 1e3) return sign + (abs / 1e3).toFixed(1).replace(/\.0$/, "") + "K";
+			return sign + Math.round(abs) + "";
+		}
+		/** Percentage string with 1 decimal (null → "—"). */
+		function pct(value, digits) {
+			if (typeof value !== "number" || !Number.isFinite(value)) return "—";
+			return value.toFixed(digits == null ? 1 : digits) + "%";
+		}
+		function clock(ms) {
+			var d = new Date(ms);
+			var p = function (x) { return (x < 10 ? "0" : "") + x; };
+			return p(d.getHours()) + ":" + p(d.getMinutes()) + ":" + p(d.getSeconds());
+		}
+		/** Hourly timestamp: "M/D HH:00". */
+		function dtHour(ms) {
+			var d = new Date(ms);
+			var p = function (x) { return (x < 10 ? "0" : "") + x; };
+			return (d.getMonth() + 1) + "/" + d.getDate() + " " + p(d.getHours()) + ":00";
+		}
+		/** Minute timestamp: "HH:MM" (used by the 1h range's per-minute series). */
+		function dtMin(ms) {
+			var d = new Date(ms);
+			var p = function (x) { return (x < 10 ? "0" : "") + x; };
+			return p(d.getHours()) + ":" + p(d.getMinutes());
+		}
+		/** Clamp to the viewport so a dragged widget can never be lost off-screen. */
+		function clampRect(rect) {
+			rect.x = Math.max(4, Math.min(rect.x, (window.innerWidth || 1200) - 60));
+			rect.y = Math.max(4, Math.min(rect.y, (window.innerHeight || 800) - 40));
+			return rect;
+		}
+		function readStore(key, fallback) {
+			try {
+				var raw = window.localStorage.getItem("dsh-token-dashboard:" + key);
+				return raw === null ? fallback : raw;
+			} catch {
+				return fallback;
+			}
+		}
+		function writeStore(key, value) {
+			try {
+				window.localStorage.setItem("dsh-token-dashboard:" + key, String(value));
+			} catch { /* storage unavailable — ignore */ }
+		}
+		//#endregion
+
+		//#region charts
+		/**
+		 * Downsample to at most 64 points by UNIFORM sampling across the whole
+		 * series (first and last kept), then build a polyline "d". Uniform
+		 * sampling keeps long continuous hour-series showing the full trend
+		 * instead of only the newest tail. Flat / empty series render as a
+		 * mid-line so charts never divide by zero.
+		 */
+		function sparkPath(values, width, height, pad, baseline) {
+			var pts = values.map(function (v) { return typeof v === "number" && Number.isFinite(v) ? v : 0; });
+			if (pts.length > 64) {
+				var sampled = [];
+				var n = pts.length;
+				for (var si = 0; si < 64; si++) {
+					sampled.push(pts[Math.round((si * (n - 1)) / 63)]);
+				}
+				pts = sampled;
+			}
+			if (pts.length < 2) return { d: "", area: "" };
+			var min = Math.min.apply(null, pts);
+			var max = Math.max.apply(null, pts);
+			if (max === min) {
+				max = min + 1;
+				min = min - 1;
+			}
+			var innerW = width - pad * 2;
+			var innerH = height - pad * 2;
+			var out = [];
+			for (var i = 0; i < pts.length; i++) {
+				var x = pad + (innerW * i) / (pts.length - 1);
+				var y = pad + innerH * (1 - (pts[i] - min) / (max - min));
+				out.push((i === 0 ? "M" : "L") + x.toFixed(1) + " " + y.toFixed(1));
+			}
+			var line = out.join(" ");
+			var base = Math.min(height - pad, Math.max(pad, pad + innerH * (1 - (baseline - min) / (max - min))));
+			var area = line + " L" + (pad + innerW).toFixed(1) + " " + base.toFixed(1) + " L" + pad.toFixed(1) + " " + base.toFixed(1) + " Z";
+			return { d: line, area: area };
+		}
+		/** SVG HTML for one sparkline (line + optional translucent area). */
+		function sparkSvg(values, opts) {
+			var W = 320, H = 46, P = 3, base = opts && opts.baseline;
+			var path = sparkPath(values, W, H, P, base);
+			var color = (opts && opts.color) || "#58a6ff";
+			var parts = [];
+			parts.push("<svg class=\"tdb-svg\" viewBox=\"0 0 " + W + " " + H + "\" preserveAspectRatio=\"none\" aria-hidden=\"true\">");
+			if (path.area) parts.push("<path d=\"" + path.area + "\" fill=\"" + color + "\" opacity=\"0.15\"/>");
+			if (path.d) parts.push("<path d=\"" + path.d + "\" fill=\"none\" stroke=\"" + color + "\" stroke-width=\"1.6\" stroke-linecap=\"round\" stroke-linejoin=\"round\" vector-effect=\"non-scaling-stroke\"/>");
+			parts.push("</svg>");
+			return parts.join("");
+		}
+		//#endregion
+
+		/**
+		 * Plugin apply — build the widget on the client root context.
+		 * @param {import('@deepseek-ai/cordis').Context} ctx
+		 * @param {Record<string, unknown>} [config]
+		 */
+		function apply(ctx, config) {
+			config = config || {};
+			var apiPath = typeof config.apiPath === "string" && config.apiPath !== "" ? config.apiPath : "/token-dashboard/api";
+			var refreshMs = Number(config.refreshMs) > 0 ? Number(config.refreshMs) : 2500;
+
+			var data = null;        // last successful payload
+			var error = null;       // last fetch error text
+			var collapsed = readStore("collapsed", "1") === "1";
+			var range = readStore("range", "all");
+			if (["all", "30d", "7d", "1d", "1h"].indexOf(range) === -1) range = "all";
+			var pos = null;         // dragged {x,y}; null → default corner
+			try {
+				var rawPos = readStore("pos", "");
+				if (rawPos) pos = clampRect(JSON.parse(rawPos));
+			} catch { pos = null; }
+
+			// ── build the DOM skeleton ─────────────────────────────────────────
+			var root = document.createElement("dsh-token-dashboard");
+			root.innerHTML = [
+				"<div class=\"tdb-panel\">",
+				"  <div class=\"tdb-head\" title=\"拖动移动 · 单击空白处展开/收起\">",
+				"    <span class=\"tdb-dot\"></span>",
+				"    <span class=\"tdb-title\">Token 面板</span>",
+				"    <span class=\"tdb-status\"></span>",
+				"    <span class=\"tdb-summary\"></span>",
+				"    <span class=\"tdb-btns\">",
+				"      <button type=\"button\" class=\"tdb-btn tdb-refresh\" title=\"刷新数据 (R)\" aria-label=\"刷新数据\"></button>",
+				"      <button type=\"button\" class=\"tdb-btn tdb-toggle\" title=\"展开/收起 ([ / ])\" aria-label=\"展开/收起\"></button>",
+				"    </span>",
+				"  </div>",
+				"  <div class=\"tdb-body\" hidden=\"\">",
+				"    <div class=\"tdb-range\" role=\"tablist\" aria-label=\"时间范围\">",
+				"      <button type=\"button\" class=\"tdb-rag\" data-range=\"all\">全部</button>",
+				"      <button type=\"button\" class=\"tdb-rag\" data-range=\"30d\">1月</button>",
+				"      <button type=\"button\" class=\"tdb-rag\" data-range=\"7d\">1周</button>",
+				"      <button type=\"button\" class=\"tdb-rag\" data-range=\"1d\">1天</button>",
+				"      <button type=\"button\" class=\"tdb-rag\" data-range=\"1h\">1小时</button>",
+				"    </div>",
+				"    <div class=\"tdb-tabs\" role=\"tablist\" aria-label=\"视图\">",
+				"      <button type=\"button\" class=\"tdb-tab\" data-tab=\"all\">总消耗</button>",
+				"      <button type=\"button\" class=\"tdb-tab\" data-tab=\"session\">会话</button>",
+				"      <button type=\"button\" class=\"tdb-tab\" data-tab=\"model\">模型</button>",
+				"      <button type=\"button\" class=\"tdb-tab\" data-tab=\"deepseek\">DeepSeek</button>",
+				"    </div>",
+				"    <div class=\"tdb-pane tdb-pane-all\">",
+				"      <div class=\"tdb-grid\">",
+				"        <div class=\"tdb-cell tdb-c-in\"><b class=\"tdb-av-in\">—</b><span><i class=\"tdb-i\"></i>输入 · uncached</span></div>",
+				"        <div class=\"tdb-cell tdb-c-out\"><b class=\"tdb-av-out\">—</b><span><i class=\"tdb-i\"></i>输出</span></div>",
+				"        <div class=\"tdb-cell tdb-c-cr\"><b class=\"tdb-av-cr\">—</b><span><i class=\"tdb-i\"></i>缓存读取</span></div>",
+				"        <div class=\"tdb-cell tdb-c-hit\"><b class=\"tdb-av-hit\">—</b><span><i class=\"tdb-i\"></i>总命中率</span></div>",
+				"        <div class=\"tdb-cell tdb-c-cw\"><b class=\"tdb-av-cw\">—</b><span><i class=\"tdb-i\"></i>缓存写入</span></div>",
+				"        <div class=\"tdb-cell tdb-c-ctx\"><b class=\"tdb-av-ctx\">—</b><span><i class=\"tdb-i\"></i>上下文占用</span></div>",
+				"        <div class=\"tdb-cell tdb-c-calls\"><b class=\"tdb-av-calls\">—</b><span><i class=\"tdb-i\"></i>API 调用次数 · 全部会话</span></div>",
+				"      </div>",
+				"      <div class=\"tdb-chart\">",
+				"        <div class=\"tdb-clabel\"><span class=\"tdb-mpick tdb-apick\" role=\"tablist\" aria-label=\"图表数据\">",
+				"          <button type=\"button\" data-metric=\"out\">输出</button>",
+				"          <button type=\"button\" data-metric=\"in\">输入</button>",
+				"          <button type=\"button\" data-metric=\"cr\">缓存读取</button>",
+				"          <button type=\"button\" data-metric=\"total\">总消耗</button>",
+				"          <button type=\"button\" data-metric=\"calls\">调用次数</button>",
+				"        </span><span class=\"tdb-ac1l\"></span></div>",
+				"        <div class=\"tdb-chart-wrap\"><div class=\"tdb-ac1\"><div class=\"tdb-empty\">暂无趋势数据</div></div><div class=\"tdb-tip\" role=\"tooltip\"></div></div>",
+				"        <div class=\"tdb-clabel\"><span>每小时总消耗</span><span class=\"tdb-ac2l\"></span></div>",
+				"        <div class=\"tdb-chart-wrap\"><div class=\"tdb-ac2\"><div class=\"tdb-empty\">暂无消耗数据</div></div><div class=\"tdb-tip\" role=\"tooltip\"></div></div>",
+				"      </div>",
+				"    </div>",
+				"    <div class=\"tdb-pane tdb-pane-session\" hidden=\"\">",
+				"      <div class=\"tdb-selrow\">",
+				"        <select class=\"tdb-select\" aria-label=\"选择会话\"></select>",
+				"      </div>",
+				"      <div class=\"tdb-grid\">",
+				"        <div class=\"tdb-cell tdb-c-in\"><b class=\"tdb-v-in\">—</b><span><i class=\"tdb-i\"></i>输入 · uncached</span></div>",
+				"        <div class=\"tdb-cell tdb-c-out\"><b class=\"tdb-v-out\">—</b><span><i class=\"tdb-i\"></i>输出</span></div>",
+				"        <div class=\"tdb-cell tdb-c-cr\"><b class=\"tdb-v-cr\">—</b><span><i class=\"tdb-i\"></i>缓存读取</span></div>",
+				"        <div class=\"tdb-cell tdb-c-hit\"><b class=\"tdb-v-hit\">—</b><span><i class=\"tdb-i\"></i>缓存命中率</span></div>",
+				"        <div class=\"tdb-cell tdb-c-cw\"><b class=\"tdb-v-cw\">—</b><span><i class=\"tdb-i\"></i>缓存写入</span></div>",
+				"        <div class=\"tdb-cell tdb-c-ctx\"><b class=\"tdb-v-ctx\">—</b><span><i class=\"tdb-i\"></i>上下文占用</span></div>",
+				"        <div class=\"tdb-cell tdb-c-calls\"><b class=\"tdb-v-calls\">—</b><span><i class=\"tdb-i\"></i>API 调用次数 · 本会话</span></div>",
+				"      </div>",
+				"      <div class=\"tdb-chart\">",
+				"        <div class=\"tdb-clabel\"><span class=\"tdb-mpick tdb-spick\" role=\"tablist\" aria-label=\"图表数据\">",
+				"          <button type=\"button\" data-metric=\"out\">输出</button>",
+				"          <button type=\"button\" data-metric=\"in\">输入</button>",
+				"          <button type=\"button\" data-metric=\"cr\">缓存读取</button>",
+				"          <button type=\"button\" data-metric=\"total\">总消耗</button>",
+				"          <button type=\"button\" data-metric=\"calls\">调用次数</button>",
+				"        </span><span class=\"tdb-c1-legend\"></span></div>",
+				"        <div class=\"tdb-chart-wrap\"><div class=\"tdb-c1\"><div class=\"tdb-empty\">暂无趋势数据</div></div><div class=\"tdb-tip\" role=\"tooltip\"></div></div>",
+				"        <div class=\"tdb-clabel\"><span>每小时总消耗</span><span class=\"tdb-c2-legend\"></span></div>",
+				"        <div class=\"tdb-chart-wrap\"><div class=\"tdb-c2\"><div class=\"tdb-empty\">暂无消耗数据</div></div><div class=\"tdb-tip\" role=\"tooltip\"></div></div>",
+				"      </div>",
+				"    </div>",
+				"    <div class=\"tdb-pane tdb-pane-model\" hidden=\"\">",
+				"      <div class=\"tdb-mlist\"><div class=\"tdb-empty\">暂无模型数据</div></div>",
+				"    </div>",
+				"    <div class=\"tdb-pane tdb-pane-deepseek\" hidden=\"\">",
+				"      <div class=\"tdb-ds-note\"></div>",
+				"      <div class=\"tdb-grid\">",
+				"        <div class=\"tdb-cell tdb-c-ctx\"><b class=\"tdb-ds-total\">—</b><span>总余额</span></div>",
+				"        <div class=\"tdb-cell tdb-c-cr\"><b class=\"tdb-ds-granted\">—</b><span>赠送余额</span></div>",
+				"        <div class=\"tdb-cell tdb-c-in\"><b class=\"tdb-ds-topped\">—</b><span>充值余额</span></div>",
+				"      </div>",
+				"      <div class=\"tdb-mgrid\">",
+				"        <div class=\"tdb-cell tdb-c-cr\"><b class=\"tdb-ds-c-h1\">—</b><span>近1小时余额消耗</span></div>",
+				"        <div class=\"tdb-cell tdb-c-in\"><b class=\"tdb-ds-c-d1\">—</b><span>近24小时余额消耗</span></div>",
+				"        <div class=\"tdb-cell tdb-c-out\"><b class=\"tdb-ds-c-d7\">—</b><span>近7天余额消耗</span></div>",
+				"        <div class=\"tdb-cell tdb-mtot\"><b class=\"tdb-ds-c-all\">—</b><span>自监控以来余额消耗</span></div>",
+				"      </div>",
+				"      <div class=\"tdb-chart\">",
+				"        <div class=\"tdb-clabel\"><span>余额走势</span><span class=\"tdb-ds-leg\"></span></div>",
+				"        <div class=\"tdb-chart-wrap\"><div class=\"tdb-ds-chart\"><div class=\"tdb-empty\">暂无余额样本</div></div><div class=\"tdb-tip\" role=\"tooltip\"></div></div>",
+				"      </div>",
+				"      <div class=\"tdb-ds-meta\">—</div>",
+				"    </div>",
+				"    <div class=\"tdb-foot\">",
+				"      <span class=\"tdb-fupdated\">—</span>",
+				"    </div>",
+				"  </div>",
+				"</div>"
+			].join("");
+			document.body.appendChild(root);
+
+			var panel = root.querySelector(".tdb-panel");
+			var dot = root.querySelector(".tdb-dot");
+			var summary = root.querySelector(".tdb-summary");
+			var bodyEl = root.querySelector(".tdb-body");
+			var toggleBtn = root.querySelector(".tdb-toggle");
+			var refreshBtn = root.querySelector(".tdb-refresh");
+			var fUpdated = root.querySelector(".tdb-fupdated");
+			var statusEl = root.querySelector(".tdb-status");
+			var selEl = root.querySelector(".tdb-select");
+			var rangeBtns = root.querySelectorAll(".tdb-rag");
+			var els = {};
+			[["in", ".tdb-v-in"], ["out", ".tdb-v-out"], ["cr", ".tdb-v-cr"], ["hit", ".tdb-v-hit"], ["cw", ".tdb-v-cw"], ["ctx", ".tdb-v-ctx"], ["calls", ".tdb-v-calls"]].forEach(function (p) { els[p[0]] = root.querySelector(p[1]); });
+			var c1 = root.querySelector(".tdb-c1");
+			var c2 = root.querySelector(".tdb-c2");
+			var c1Wrap = c1.parentElement;
+			var c2Wrap = c2.parentElement;
+			var c1Tip = c1Wrap.querySelector(".tdb-tip");
+			var c2Tip = c2Wrap.querySelector(".tdb-tip");
+			var c1leg = root.querySelector(".tdb-c1-legend");
+			var c2leg = root.querySelector(".tdb-c2-legend");
+			var selId = readStore("session", "");
+			/** Follow the most recently active session automatically (default on). */
+			var follow = readStore("follow", "1") === "1";
+			/** Active view: "all" = 总消耗 (aggregate), "session" = per-session,
+			 *  "model" = per-model consumption, "deepseek" = official balance. */
+			var tab = readStore("tab", "session");
+			if (tab !== "all" && tab !== "session" && tab !== "model" && tab !== "deepseek") tab = "session";
+			var TAB_ORDER = ["all", "session", "model", "deepseek"];
+			var tabBtns = root.querySelectorAll(".tdb-tab");
+			var paneAll = root.querySelector(".tdb-pane-all");
+			var paneSession = root.querySelector(".tdb-pane-session");
+			var paneModel = root.querySelector(".tdb-pane-model");
+			var paneDeepseek = root.querySelector(".tdb-pane-deepseek");
+			var mlistEl = root.querySelector(".tdb-mlist");
+			var dsNote = root.querySelector(".tdb-ds-note");
+			var dsMeta = root.querySelector(".tdb-ds-meta");
+			var dsEls = {};
+			[["total", ".tdb-ds-total"], ["granted", ".tdb-ds-granted"], ["topped", ".tdb-ds-topped"]].forEach(function (p) { dsEls[p[0]] = root.querySelector(p[1]); });
+			var dsC = {};
+			[["h1", ".tdb-ds-c-h1"], ["d1", ".tdb-ds-c-d1"], ["d7", ".tdb-ds-c-d7"], ["all", ".tdb-ds-c-all"]].forEach(function (p) { dsC[p[0]] = root.querySelector(p[1]); });
+			var dsChart = root.querySelector(".tdb-ds-chart");
+			var dsChartWrap = dsChart.parentElement;
+			var dsTip = dsChartWrap.querySelector(".tdb-tip");
+			var dsLeg = root.querySelector(".tdb-ds-leg");
+			var aels = {};
+			[["in", ".tdb-av-in"], ["out", ".tdb-av-out"], ["cr", ".tdb-av-cr"], ["hit", ".tdb-av-hit"], ["cw", ".tdb-av-cw"], ["ctx", ".tdb-av-ctx"], ["calls", ".tdb-av-calls"]].forEach(function (p) { aels[p[0]] = root.querySelector(p[1]); });
+			var ac1 = root.querySelector(".tdb-ac1");
+			var ac2 = root.querySelector(".tdb-ac2");
+			var ac1Wrap = ac1.parentElement;
+			var ac2Wrap = ac2.parentElement;
+			var ac1Tip = ac1Wrap.querySelector(".tdb-tip");
+			var ac2Tip = ac2Wrap.querySelector(".tdb-tip");
+			var ac1leg = root.querySelector(".tdb-ac1l");
+			var ac2leg = root.querySelector(".tdb-ac2l");
+			/** Metric shown by the FIRST chart of the 总消耗 / 会话 panes. Each pane
+			 *  keeps its own choice, persisted like every other view preference. */
+			var METRICS = ["out", "in", "cr", "total", "calls"];
+			var aMetric = readStore("ametric", "out");
+			var sMetric = readStore("smetric", "out");
+			if (METRICS.indexOf(aMetric) === -1) aMetric = "out";
+			if (METRICS.indexOf(sMetric) === -1) sMetric = "out";
+			var aPickBtns = root.querySelectorAll(".tdb-apick button");
+			var sPickBtns = root.querySelectorAll(".tdb-spick button");
+
+			/** Per-metric chart config: how to pull the value out of one trend point,
+			 *  its accent color, unit, and tooltip wording. Keeps the two panes'
+			 *  first chart identical in behaviour while the data source varies. */
+			var METRIC_DEFS = {
+				out: { label: "输出", color: "var(--tdb-accent-out)", unit: "tok", pick: function (s) { return s.out; } },
+				in: { label: "输入 · uncached", color: "var(--tdb-accent-in)", unit: "tok", pick: function (s) { return s.in; } },
+				cr: { label: "缓存读取", color: "var(--tdb-accent-cr)", unit: "tok", pick: function (s) { return s.cr; } },
+				total: { label: "总消耗(输入+输出)", color: "var(--tdb-accent-ctx)", unit: "tok", pick: function (s) { return s.in + s.out; } },
+				calls: { label: "API 调用次数", color: "var(--tdb-accent-calls)", unit: "次", pick: function (s) { return typeof s.calls === "number" ? s.calls : 0; } },
+			};
+
+			/** Render the switchable first chart for one pane. */
+			function renderMetricChart(container, legendEl, series, metric) {
+				var def = METRIC_DEFS[metric] || METRIC_DEFS.out;
+				var vals = series.map(def.pick);
+				var isCalls = metric === "calls";
+				renderChart(container, legendEl, vals, {
+					color: def.color,
+					unit: def.unit,
+					min: 0,
+					legend: vals.length >= 2
+						? "峰值 " + (isCalls ? String(Math.max.apply(null, vals)) : fmt(Math.max.apply(null, vals))) + " · " + vals.length + slotUnit
+						: "",
+					tooltip: function (i) {
+						var s = series[i];
+						var v = def.pick(s);
+						return "<b>" + (isCalls ? String(v) + " 次" : fmt(v) + " tok") + "</b>" + def.label +
+							'<span class="tdb-tip-time">' + tf(s.t) + "</span>";
+					},
+					emptyMsg: "暂无趋势数据",
+				});
+			}
+
+			/** Apply stored position / collapse. The root custom element carries the
+			 *  fixed positioning; the panel is its (pointer-events:auto) child. */
+			function syncLayout() {
+				root.style.left = pos ? Math.round(pos.x) + "px" : "";
+				root.style.top = pos ? Math.round(pos.y) + "px" : "";
+				root.style.right = pos ? "" : "16px";
+				root.style.bottom = pos ? "" : "16px";
+				setCollapsed(collapsed, true);
+			}
+
+			function setCollapsed(value, silent) {
+				collapsed = !!value;
+				bodyEl.hidden = collapsed;
+				root.setAttribute("aria-collapsed", String(collapsed));
+				toggleBtn.setAttribute("aria-expanded", String(!collapsed));
+				if (!silent) writeStore("collapsed", collapsed ? "1" : "0");
+			}
+
+			function toggle() {
+				setCollapsed(!collapsed, false);
+				if (!collapsed) refreshNow();
+			}
+
+			function setError(message) {
+				error = message || null;
+				// Rendered as a red 「连接失败」 badge by render(); keep tooltip detail.
+				statusEl.title = error ? String(error) : "";
+				render();
+			}
+
+			/** The session to display; null → global "all sessions" view.
+			 *  Follow mode pins the most recently active session (server's
+			 *  `activeId`); a manual pick overrides follow entirely. */
+			function findSession(id) {
+				if (!id || !data || !Array.isArray(data.sessions)) return null;
+				for (var i = 0; i < data.sessions.length; i++) if (data.sessions[i].id === id) return data.sessions[i];
+				return null;
+			}
+			function selectedSession() {
+				if (!data || !Array.isArray(data.sessions) || data.sessions.length === 0) return null;
+				if (follow) {
+					// Follow the session the user is actively talking to; if it fell
+					// outside the selected time range, show the global aggregate.
+					return findSession(data.activeId) || null;
+				}
+				return findSession(selId);
+			}
+
+			/** Build the pill chips shown in the collapsed summary. */
+			function renderSummaryChips(totals, hit, occupancy) {
+				var out = totals.output || 0;
+				var parts = [
+					'<span class="tdb-s-chip"><b>' + esc(fmt(out)) + '</b> 出</span>',
+					hit === null
+						? '<span class="tdb-s-chip"><b>—</b> 缓</span>'
+						: '<span class="tdb-s-chip tdb-s-hit"><b>' + hit.toFixed(0) + '%</b> 缓</span>',
+				];
+				if (occupancy !== null) {
+					parts.push('<span class="tdb-s-chip tdb-s-ctx"><b>' + occupancy.toFixed(0) + '%</b> ctx</span>');
+				}
+				return parts.join("");
+			}
+
+			/** Render a single sparkline chart with hover tooltip + cursor. */
+			function renderChart(container, legendEl, values, opts) {
+				legendEl.textContent = opts.legend || "";
+				if (values.length < 2) {
+					container.innerHTML = '<div class="tdb-empty">' + esc(opts.emptyMsg) + '</div>';
+					return;
+				}
+				container.innerHTML = sparkSvg(values, { color: opts.color, baseline: opts.min });
+				var svg = container.querySelector("svg.tdb-svg");
+				if (!svg) return;
+				// Inject a dashed cursor line that follows the mouse.
+				var ns = "http://www.w3.org/2000/svg";
+				var cursor = document.createElementNS(ns, "line");
+				var vb = svg.getAttribute("viewBox").split(" ").map(Number);
+				cursor.setAttribute("class", "tdb-cursor");
+				cursor.setAttribute("y1", "0");
+				cursor.setAttribute("y2", String(vb[3]));
+				cursor.setAttribute("x1", "0");
+				cursor.setAttribute("x2", "0");
+				svg.appendChild(cursor);
+				var wrap = container.parentElement;
+				var tip = wrap.querySelector(".tdb-tip");
+				function onMove(ev) {
+					var rect = svg.getBoundingClientRect();
+					var x = ev.clientX - rect.left;
+					var frac = Math.max(0, Math.min(1, x / rect.width));
+					var i = Math.round(frac * (values.length - 1));
+					var cx = vb[2] * frac;
+					cursor.setAttribute("x1", cx.toFixed(1));
+					cursor.setAttribute("x2", cx.toFixed(1));
+					cursor.classList.add("show");
+					tip.innerHTML = opts.tooltip(i);
+					var tipRect = tip.getBoundingClientRect();
+					var px = Math.max(2, Math.min(rect.width - tipRect.width - 2, x - tipRect.width / 2));
+					var py = Math.max(0, Math.min(rect.height - tipRect.height - 2, 8));
+					tip.style.left = px + "px";
+					tip.style.top = py + "px";
+					tip.classList.add("show");
+				}
+				function onLeave() {
+					cursor.classList.remove("show");
+					tip.classList.remove("show");
+				}
+				svg.addEventListener("mousemove", onMove);
+				svg.addEventListener("mouseleave", onLeave);
+				svg.addEventListener("touchstart", function (ev) { var t = ev.touches && ev.touches[0]; if (t) onMove(t); }, { passive: true });
+				svg.addEventListener("touchend", onLeave);
+			}
+
+			/** Range-aware time-axis label: minutes for the 1h range, hours otherwise. */
+			var tf = function (ms) { return range === "1h" ? dtMin(ms) : dtHour(ms); };
+			/** Trend-point unit label: "分" for the 1h range, "时" otherwise. */
+			var slotUnit = range === "1h" ? " 分" : " 时";
+
+			/** Render the 总消耗 (aggregate) pane: direct sums for cumulative fields,
+			 *  weighted total hit-rate, and no context occupancy (an instantaneous
+			 *  per-session metric that has no meaningful total). */
+			function renderPaneAll() {
+				if (!data || !data.totals) {
+					for (var k in aels) aels[k].textContent = "—";
+					ac1.innerHTML = '<div class="tdb-empty">暂无趋势数据</div>';
+					ac2.innerHTML = '<div class="tdb-empty">暂无消耗数据</div>';
+					ac1leg.textContent = ac2leg.textContent = "";
+					return;
+				}
+				var t = data.totals;
+				var billed = (t.uncached || 0) + (t.cacheRead || 0) + (t.cacheWrite || 0);
+				var hit = billed > 0 ? ((t.cacheRead || 0) / billed) * 100 : null;
+				aels.in.textContent = fmt(t.uncached);
+				aels.out.textContent = fmt(t.output);
+				aels.cr.textContent = fmt(t.cacheRead);
+				if (data.hasCacheWrite === false) {
+					aels.cw.textContent = "—";
+					aels.cw.parentElement.title = "数据源未上报缓存写入";
+				} else {
+					aels.cw.textContent = fmt(t.cacheWrite);
+					aels.cw.parentElement.title = "";
+				}
+				aels.hit.textContent = pct(hit, 1);
+				aels.ctx.textContent = "—";
+				aels.ctx.parentElement.title = "上下文占用是单会话实时状态,不参与总量统计";
+				var series = Array.isArray(data.series) ? data.series : [];
+				// API calls in the window: exact count of assistant/message events.
+				var aCalls = typeof t.calls === "number" ? t.calls : null;
+				aels.calls.textContent = aCalls === null ? "—" : String(aCalls);
+				aels.calls.parentElement.title = aCalls === null
+					? "数据源未上报调用次数"
+					: "当前时间范围内所有会话的 API 调用次数(每次模型回复计 1 次)";
+				// Total consumption = uncached input + output only (cache read/write
+				// are discounted/zero-priced, so they are excluded from the burn).
+				var totalVals = series.map(function (s) { return s.in + s.out; });
+				renderMetricChart(ac1, ac1leg, series, aMetric);
+				renderChart(ac2, ac2leg, totalVals, {
+					color: "var(--tdb-accent-in)",
+					unit: "tok",
+					min: 0,
+					legend: totalVals.length >= 2 ? "峰值 " + fmt(Math.max.apply(null, totalVals)) + " · " + totalVals.length + slotUnit : "",
+					tooltip: function (i) {
+						var s = series[i];
+						return "<b>" + fmt(s.in + s.out) + " tok</b>总消耗(输入+输出)" +
+							'<span class="tdb-tip-time">' + tf(s.t) + "</span>";
+					},
+					emptyMsg: "暂无消耗数据",
+				});
+			}
+
+			/** Render the 会话 pane for one session. */
+			function renderPaneSession(session) {
+				if (!data || !data.totals || !session) {
+					dot.className = "tdb-dot idle";
+					for (var k in els) els[k].textContent = "—";
+					c1.innerHTML = '<div class="tdb-empty">暂无趋势数据</div>';
+					c2.innerHTML = '<div class="tdb-empty">暂无消耗数据</div>';
+					c1leg.textContent = c2leg.textContent = "";
+					return;
+				}
+				var totals = session.totals || {};
+				var billed = (totals.uncached || 0) + (totals.cacheRead || 0) + (totals.cacheWrite || 0);
+				var hit = billed > 0 ? ((totals.cacheRead || 0) / billed) * 100 : null;
+				var context = session.context || {};
+				var occupancy = null;
+				if (typeof context.projectedTokens === "number" && typeof context.contextWindow === "number" && context.contextWindow > 0) {
+					occupancy = (context.projectedTokens / context.contextWindow) * 100;
+				}
+				var series = Array.isArray(session.series) ? session.series : [];
+				dot.className = "tdb-dot" + (series.length === 0 ? " idle" : "");
+				els.in.textContent = fmt(totals.uncached);
+				els.out.textContent = fmt(totals.output);
+				els.cr.textContent = fmt(totals.cacheRead);
+				if (data.hasCacheWrite === false) {
+					els.cw.textContent = "—";
+					els.cw.parentElement.title = "数据源未上报缓存写入";
+				} else {
+					els.cw.textContent = fmt(totals.cacheWrite);
+					els.cw.parentElement.title = "";
+				}
+				els.hit.textContent = pct(hit, 1);
+				els.ctx.textContent = occupancy === null
+					? "—"
+					: fmt(context.projectedTokens) + " / " + fmt(context.contextWindow) + "  " + occupancy.toFixed(0) + "%";
+				// API calls for THIS session inside the window.
+				var sCalls = typeof totals.calls === "number" ? totals.calls : null;
+				els.calls.textContent = sCalls === null ? "—" : String(sCalls);
+				els.calls.parentElement.title = sCalls === null
+					? "数据源未上报调用次数"
+					: "当前时间范围内本会话的 API 调用次数(每次模型回复计 1 次)";
+				// Total consumption = uncached input + output only.
+				var totalVals = series.map(function (s) { return s.in + s.out; });
+				renderMetricChart(c1, c1leg, series, sMetric);
+				renderChart(c2, c2leg, totalVals, {
+					color: "var(--tdb-accent-in)",
+					unit: "tok",
+					min: 0,
+					legend: totalVals.length >= 2 ? "峰值 " + fmt(Math.max.apply(null, totalVals)) + " · " + totalVals.length + slotUnit : "",
+					tooltip: function (i) {
+						var s = series[i];
+						return "<b>" + fmt(s.in + s.out) + " tok</b>总消耗(输入+输出)" +
+							'<span class="tdb-tip-time">' + tf(s.t) + "</span>";
+					},
+					emptyMsg: "暂无消耗数据",
+				});
+			}
+
+			/** Render the 模型 pane: one card per provider/model with its in-window
+			 *  token breakdown, share of total burn, and cache-hit rate. */
+			function renderPaneModel() {
+				var models = data && Array.isArray(data.models) ? data.models : [];
+				if (models.length === 0) {
+					mlistEl.innerHTML = '<div class="tdb-empty">暂无模型数据</div>';
+					return;
+				}
+				var cards = [];
+				for (var i = 0; i < models.length; i++) {
+					var m = models[i];
+					var t = m.totals || {};
+					var total = (t.uncached || 0) + (t.output || 0);
+					var share = typeof m.sharePct === "number" ? m.sharePct : 0;
+					var hit = typeof m.hitPct === "number" ? m.hitPct : 0;
+					var prov = (typeof m.provider === "string" && m.provider !== "" && m.provider !== "未知")
+						? esc(m.provider)
+						: "未知提供商";
+					var hitTxt = hit > 0 ? "命中 " + hit.toFixed(1) + "%" : "命中率 —";
+					var mCalls = typeof t.calls === "number" ? t.calls : null;
+					cards.push(
+						'<div class="tdb-mcard">' +
+						'<div class="tdb-mtop"><b class="tdb-mname" title="提供商: ' + esc(m.provider || "未知") + '">' + esc(m.model || "未知") + '</b>' +
+						'<span class="tdb-mprov">' + prov + '</span><span class="tdb-mpct">' + share.toFixed(1) + '%</span></div>' +
+						'<div class="tdb-mgrid">' +
+						'<div class="tdb-cell tdb-c-in"><b>' + fmt(t.uncached) + '</b><span><i class="tdb-i"></i>输入 · uncached</span></div>' +
+						'<div class="tdb-cell tdb-c-cr"><b>' + fmt(t.cacheRead) + '</b><span><i class="tdb-i"></i>缓存读取</span></div>' +
+						'<div class="tdb-cell tdb-c-out"><b>' + fmt(t.output) + '</b><span><i class="tdb-i"></i>输出</span></div>' +
+						'<div class="tdb-cell tdb-c-calls" title="' + (mCalls === null ? '数据源未上报调用次数' : '当前时间范围内该模型的 API 调用次数') + '"><b>' + (mCalls === null ? "—" : String(mCalls)) + '</b><span><i class="tdb-i"></i>API 调用次数</span></div>' +
+						'<div class="tdb-cell tdb-mtot"><b>' + fmt(total) + '</b><span>总消耗(输入+输出) · ' + hitTxt + '</span></div>' +
+						'</div>' +
+						'<div class="tdb-mbar"><i style="width:' + Math.min(100, Math.max(0.5, share)) + '%"></i></div>' +
+						'</div>'
+					);
+				}
+				mlistEl.innerHTML = cards.join("");
+			}
+
+			/** Render the DeepSeek pane: official account balance (or a setup/error
+			 *  notice when no key is configured or the fetch failed), balance drop
+			 *  over trailing windows, and a balance-over-time curve. */
+			function renderPaneDeepseek() {
+				var b = data && data.balance ? data.balance : null;
+				var v = { total: "—", granted: "—", topped: "—" };
+				if (b && b.ok && Array.isArray(b.infos) && b.infos.length > 0) {
+					var i0 = b.infos[0];
+					if (typeof i0.total === "number" && Number.isFinite(i0.total)) v.total = "¥" + i0.total.toFixed(2);
+					if (typeof i0.granted === "number" && Number.isFinite(i0.granted)) v.granted = "¥" + i0.granted.toFixed(2);
+					if (typeof i0.topped === "number" && Number.isFinite(i0.topped)) v.topped = "¥" + i0.topped.toFixed(2);
+				}
+				dsEls.total.textContent = v.total;
+				dsEls.granted.textContent = v.granted;
+				dsEls.topped.textContent = v.topped;
+				// Balance drop over the trailing windows (¥, negative = balance went
+				// up, e.g. a recharge/grant landed mid-window).
+				var c = b && b.consumed ? b.consumed : null;
+				var cKeys = [["h1", "近1小时"], ["d1", "近24小时"], ["d7", "近7天"], ["all", "自监控以来"]];
+				for (var ci = 0; ci < cKeys.length; ci++) {
+					var ck = cKeys[ci][0];
+					var cv = c && typeof c[ck] === "number" ? c[ck] : null;
+					var el = dsC[ck];
+					if (cv === null) {
+						el.textContent = "—";
+						el.parentElement.title = "采样数据不足";
+					} else {
+						var neg = cv < 0;
+						el.textContent = (neg ? "↑" : "−") + "¥" + Math.abs(cv).toFixed(2);
+						el.parentElement.title = cKeys[ci][1] + "余额变化" + (neg ? "（期间余额增加，可能充值/赠送到账）" : "（近似消耗，可能含其他渠道消费，以官方账单为准）");
+					}
+				}
+				if (!b) {
+					dsNote.textContent = "余额信息暂不可用";
+					dsNote.className = "tdb-ds-note";
+				} else if (!b.configured) {
+					dsNote.textContent = "未配置 DeepSeek API Key：在插件配置中设置 deepseekApiKey，或设置环境变量 DEEPSEEK_API_KEY（密钥只存在服务端，不会下发到页面）。";
+					dsNote.className = "tdb-ds-note err";
+				} else if (!b.ok) {
+					dsNote.textContent = "获取余额失败：" + (b.error || "未知错误") + "（稍后自动重试，已有历史样本保留）";
+					dsNote.className = "tdb-ds-note err";
+				} else {
+					var avail = b.is_available === false ? "账户不可用（is_available=false）" : "账户正常";
+					var cur = b.infos.length > 0 ? b.infos.map(function (i) { return String(i.currency || "?"); }).join("/") : "—";
+					dsNote.textContent = "已连接 DeepSeek 官方 API · 币种 " + cur + " · " + avail + " · 消耗为余额差额的近似值，以官方账单为准";
+					dsNote.className = "tdb-ds-note ok";
+				}
+				// Balance-over-time curve from the history samples.
+				var hist = b && Array.isArray(b.history) ? b.history : [];
+				var vals = [];
+				for (var hi = 0; hi < hist.length; hi++) {
+					if (typeof hist[hi].total === "number" && Number.isFinite(hist[hi].total)) vals.push(hist[hi].total);
+				}
+				if (vals.length < 2) {
+					dsChart.innerHTML = '<div class="tdb-empty">暂无余额样本</div>';
+					dsLeg.textContent = "";
+				} else {
+					dsChart.innerHTML = sparkSvg(vals, { color: "var(--tdb-accent-ctx)", baseline: 0 });
+					var svg = dsChart.querySelector("svg.tdb-svg");
+					if (svg) {
+						var ns = "http://www.w3.org/2000/svg";
+						var cursor = document.createElementNS(ns, "line");
+						var vb = svg.getAttribute("viewBox").split(" ").map(Number);
+						cursor.setAttribute("class", "tdb-cursor");
+						cursor.setAttribute("y1", "0");
+						cursor.setAttribute("y2", String(vb[3]));
+						cursor.setAttribute("x1", "0");
+						cursor.setAttribute("x2", "0");
+						svg.appendChild(cursor);
+						function onDsMove(ev) {
+							var rect = svg.getBoundingClientRect();
+							var x = ev.clientX - rect.left;
+							var frac = Math.max(0, Math.min(1, x / rect.width));
+							var i = Math.round(frac * (vals.length - 1));
+							var cx = vb[2] * frac;
+							cursor.setAttribute("x1", cx.toFixed(1));
+							cursor.setAttribute("x2", cx.toFixed(1));
+							cursor.classList.add("show");
+							var h = hist[i];
+							dsTip.innerHTML = "<b>¥" + h.total.toFixed(2) + "</b>余额" +
+								'<span class="tdb-tip-time">' + (h.t ? tf(h.t) : "") + "</span>";
+							var tipRect = dsTip.getBoundingClientRect();
+							var px = Math.max(2, Math.min(rect.width - tipRect.width - 2, x - tipRect.width / 2));
+							var py = Math.max(0, Math.min(rect.height - tipRect.height - 2, 8));
+							dsTip.style.left = px + "px";
+							dsTip.style.top = py + "px";
+							dsTip.classList.add("show");
+						}
+						function onDsLeave() {
+							cursor.classList.remove("show");
+							dsTip.classList.remove("show");
+						}
+						svg.addEventListener("mousemove", onDsMove);
+						svg.addEventListener("mouseleave", onDsLeave);
+						svg.addEventListener("touchstart", function (ev) { var t = ev.touches && ev.touches[0]; if (t) onDsMove(t); }, { passive: true });
+						svg.addEventListener("touchend", onDsLeave);
+					}
+					dsLeg.textContent = hist.length + " 样本 · 现 ¥" + (vals[vals.length - 1]).toFixed(2);
+				}
+				dsMeta.textContent = b && b.fetchedAt ? "上次获取 " + clock(b.fetchedAt) + " · 每 30 分钟采样 · 历史已持久化，重启保留" : "—";
+			}
+
+			/** Re-render everything from `data`. */
+			function render() {
+				if (error) {
+					statusEl.textContent = "连接失败";
+					statusEl.className = "tdb-status tdb-status-err";
+				} else if (data && data.backfilled) {
+					statusEl.textContent = "已回填";
+					statusEl.className = "tdb-status tdb-status-ok";
+				} else if (data && data.backfillError) {
+					statusEl.textContent = "回填失败";
+					statusEl.className = "tdb-status tdb-status-err";
+				} else {
+					statusEl.textContent = data ? "回填中…" : "连接中…";
+					statusEl.className = "tdb-status tdb-status-pending";
+				}
+				for (var ri = 0; ri < rangeBtns.length; ri++) {
+					rangeBtns[ri].classList.toggle("active", rangeBtns[ri].getAttribute("data-range") === range);
+				}
+				for (var ti = 0; ti < tabBtns.length; ti++) {
+					tabBtns[ti].classList.toggle("active", tabBtns[ti].getAttribute("data-tab") === tab);
+				}
+				for (var api = 0; api < aPickBtns.length; api++) {
+					aPickBtns[api].classList.toggle("active", aPickBtns[api].getAttribute("data-metric") === aMetric);
+				}
+				for (var spi = 0; spi < sPickBtns.length; spi++) {
+					sPickBtns[spi].classList.toggle("active", sPickBtns[spi].getAttribute("data-metric") === sMetric);
+				}
+				paneAll.hidden = tab !== "all";
+				paneSession.hidden = tab !== "session";
+				paneModel.hidden = tab !== "model";
+				paneDeepseek.hidden = tab !== "deepseek";
+
+				var session = selectedSession(); // session pane's current session (or null)
+				renderPaneAll();
+				renderPaneSession(session);
+				renderPaneModel();
+				renderPaneDeepseek();
+
+				// Header summary follows whichever tab is active.
+				var totals, hit, occupancy;
+				if (tab === "all" && data && data.totals) {
+					totals = data.totals;
+					var ab = (totals.uncached || 0) + (totals.cacheRead || 0) + (totals.cacheWrite || 0);
+					hit = ab > 0 ? ((totals.cacheRead || 0) / ab) * 100 : null;
+					occupancy = null;
+					summary.innerHTML = renderSummaryChips(totals, hit, occupancy);
+					fUpdated.textContent = "全部会话 · " + fmt(totals.output || 0) + " tok";
+					fUpdated.title = "";
+				} else if (tab === "model") {
+					// Model tab header: top model + its burn; footer = model count.
+					var mods = data && Array.isArray(data.models) ? data.models : [];
+					if (mods.length > 0) {
+						var mTop = mods[0];
+						var mT = mTop.totals || {};
+						summary.innerHTML = '<span class="tdb-s-chip"><b>' + esc(fmt((mT.uncached || 0) + (mT.output || 0))) + '</b> ' + esc(mTop.model || "未知") + '</span>';
+						var mTotal = 0;
+						for (var mi = 0; mi < mods.length; mi++) {
+							var mt = mods[mi].totals || {};
+							mTotal += (mt.uncached || 0) + (mt.output || 0);
+						}
+						fUpdated.textContent = mods.length + " 个模型 · " + fmt(mTotal) + " tok";
+						fUpdated.title = "范围: " + (range === "all" ? "全部" : range === "30d" ? "1月" : range === "7d" ? "1周" : range === "1d" ? "1天" : "1小时");
+					} else {
+						summary.innerHTML = '<span class="tdb-s-chip"><b>—</b> 模型</span>';
+						fUpdated.textContent = "无模型数据";
+						fUpdated.title = "";
+					}
+				} else if (tab === "deepseek") {
+					// DeepSeek tab header: official account balance (+ config state).
+					var db = data && data.balance ? data.balance : null;
+					var dTotal = null;
+					if (db && db.ok && Array.isArray(db.infos) && db.infos.length > 0) {
+						var di = db.infos[0];
+						if (typeof di.total === "number" && Number.isFinite(di.total)) dTotal = di.total;
+					}
+					if (dTotal !== null) {
+						summary.innerHTML = '<span class="tdb-s-chip tdb-s-ctx"><b>¥' + dTotal.toFixed(2) + '</b> 余额</span>';
+					} else {
+						summary.innerHTML = '<span class="tdb-s-chip"><b>—</b> 余额</span>';
+					}
+					var dStat = !db ? "连接中…" : !db.configured ? "未配置 Key" : !db.ok ? "获取失败" : (db.is_available === false ? "不可用" : "官方余额");
+					fUpdated.textContent = "DeepSeek 官方 · " + dStat + (db && db.fetchedAt ? " · " + clock(db.fetchedAt) : "");
+					fUpdated.title = db && db.configured && !db.ok && db.error ? db.error : "";
+				} else if (session) {
+					totals = session.totals || {};
+					var sb = (totals.uncached || 0) + (totals.cacheRead || 0) + (totals.cacheWrite || 0);
+					hit = sb > 0 ? ((totals.cacheRead || 0) / sb) * 100 : null;
+					var sctx = session.context || {};
+					occupancy = (typeof sctx.projectedTokens === "number" && typeof sctx.contextWindow === "number" && sctx.contextWindow > 0)
+						? (sctx.projectedTokens / sctx.contextWindow) * 100
+						: null;
+					summary.innerHTML = renderSummaryChips(totals, hit, occupancy);
+					fUpdated.textContent = (session.updatedAt ? clock(session.updatedAt) : "—") + " · " + fmt(totals.output || 0) + " tok";
+					if (follow) {
+						fUpdated.title = "跟随当前会话: " + sessionLabel(session, 0);
+					} else {
+						fUpdated.title = "";
+					}
+				} else {
+					summary.innerHTML = '<span class="tdb-s-chip"><b>—</b> 等待</span>';
+					fUpdated.textContent = "无数据";
+					fUpdated.title = "";
+				}
+				updateSelect();
+			}
+
+			/** Human-readable session label for the picker: derived title (first user
+			 *  message) → cwd basename → sequential number, with a short id suffix
+			 *  and optional preset tag to disambiguate. */
+			function sessionLabel(s, i) {
+				var base = "";
+				if (typeof s.title === "string" && s.title !== "") {
+					base = s.title.length > 26 ? s.title.slice(0, 26) + "…" : s.title;
+				} else if (typeof s.cwd === "string" && s.cwd !== "") {
+					var parts = s.cwd.split(/[\\/]/).filter(Boolean);
+					base = parts.length ? parts[parts.length - 1] : s.cwd;
+				} else {
+					base = "会话 " + (i + 1);
+				}
+				var short = typeof s.id === "string" && s.id.length > 6 ? s.id.slice(-6) : (s.id || "");
+				var preset = typeof s.preset === "string" && s.preset !== "" ? " [" + s.preset + "]" : "";
+				return base + " ·" + short + preset;
+			}
+
+			function updateSelect() {
+				if (!data || (!Array.isArray(data.sessions) || data.sessions.length === 0) && !data.totals) {
+					selEl.hidden = true;
+					selEl.innerHTML = "";
+					return;
+				}
+				selEl.hidden = false;
+				var options = [
+					'<option value="__follow__"' + (follow ? " selected" : "") + '>⚡ 跟随进行中的会话</option>'
+				];
+				var list = Array.isArray(data.sessions) ? data.sessions : [];
+				for (var i = 0; i < list.length; i++) {
+					var s = list[i];
+					var tip = "会话 ID: " + s.id + (s.cwd ? "\n目录: " + s.cwd : "") + (s.preset ? "\n预设: " + s.preset : "");
+					options.push("<option value=\"" + esc(s.id) + "\"" + (!follow && s.id === selId ? " selected" : "") + " title=\"" + esc(tip) + "\">" + esc(sessionLabel(s, i)) + "</option>");
+				}
+				var html = options.join("");
+				if (selEl.innerHTML !== html) selEl.innerHTML = html;
+			}
+
+			// ── data ────────────────────────────────────────────────────────────
+			var fetching = null;
+			var timer = null;
+
+			async function refresh() {
+				if (document.hidden) return;
+				if (fetching) return fetching;
+				fetching = (async function () {
+					var response;
+					var url = apiPath + "?range=" + encodeURIComponent(range);
+					try {
+						response = await window.fetch(url, { headers: { Accept: "application/json" }, cache: "no-store" });
+						if (!response.ok) throw new Error("HTTP " + response.status);
+						var payload = await response.json();
+						if (!payload || payload.ok !== true) throw new Error("bad payload");
+						data = payload;
+						if (selId && payload.sessions && !payload.sessions.some(function (s) { return s.id === selId; })) selId = "";
+						setError(null);
+						render();
+					} catch (err) {
+						setError("无法连接: " + (err && err.message ? err.message : String(err)));
+					} finally {
+						fetching = null;
+					}
+				})();
+				return fetching;
+			}
+
+			function refreshNow() {
+				refresh();
+			}
+
+			/** Manual refresh — fetch immediately (bypasses the poll interval) with
+			 *  a short spinning affordance on the refresh button. */
+			var refreshTick = 0;
+			function doRefresh() {
+				refreshBtn.classList.add("loading");
+				var myTick = ++refreshTick;
+				window.setTimeout(function () {
+					if (refreshTick !== myTick) return;
+					refreshBtn.classList.remove("loading");
+				}, 800);
+				refreshNow();
+			}
+
+			// ── interactions ────────────────────────────────────────────────────
+			var head = root.querySelector(".tdb-head");
+			var drag = null;
+
+			function onPointerDown(ev) {
+				if (ev.button !== 0) return;
+				if (ev.target && ev.target.closest && ev.target.closest(".tdb-btns")) return;
+				var rect = root.getBoundingClientRect();
+				drag = { dx: ev.clientX - rect.left, dy: ev.clientY - rect.top, moved: false };
+				head.setPointerCapture(ev.pointerId);
+				head.addEventListener("pointermove", onPointerMove);
+				head.addEventListener("pointerup", onPointerUp);
+				head.addEventListener("pointercancel", onPointerUp);
+				ev.preventDefault();
+			}
+			function onPointerMove(ev) {
+				if (!drag) return;
+				var x = ev.clientX - drag.dx;
+				var y = ev.clientY - drag.dy;
+				pos = clampRect({ x: x, y: y });
+				drag.moved = true;
+				root.style.left = Math.round(pos.x) + "px";
+				root.style.top = Math.round(pos.y) + "px";
+				root.style.right = "";
+				root.style.bottom = "";
+			}
+			function onPointerUp(ev) {
+				if (!drag) return;
+				if (!drag.moved) toggle();
+				drag = null;
+				head.removeEventListener("pointermove", onPointerMove);
+				head.removeEventListener("pointerup", onPointerUp);
+				head.removeEventListener("pointercancel", onPointerUp);
+				if (pos) writeStore("pos", JSON.stringify(pos));
+			}
+
+			head.addEventListener("pointerdown", onPointerDown);
+			toggleBtn.addEventListener("click", toggle);
+			refreshBtn.addEventListener("click", function (ev) { ev.stopPropagation(); doRefresh(); });
+			selEl.addEventListener("change", function () {
+				var v = selEl.value;
+				if (v === "__follow__") {
+					follow = true;
+					writeStore("follow", "1");
+				} else {
+					follow = false;
+					writeStore("follow", "0");
+					selId = v; // a concrete session id
+					writeStore("session", selId);
+				}
+				render();
+			});
+			for (var tb = 0; tb < tabBtns.length; tb++) {
+				tabBtns[tb].addEventListener("click", function () {
+					var t = this.getAttribute("data-tab");
+					if (t === tab) return;
+					tab = t;
+					writeStore("tab", tab);
+					if (tab === "session" && !follow && selId === "") {
+						// Entering the session view with nothing pinned → follow the active one.
+						follow = true;
+						writeStore("follow", "1");
+					}
+					render();
+				});
+			}
+			for (var rb = 0; rb < rangeBtns.length; rb++) {
+				rangeBtns[rb].addEventListener("click", function (ev) {
+					var r = this.getAttribute("data-range");
+					if (r === range) return;
+					range = r;
+					writeStore("range", range);
+					// Range changed — refresh immediately with the new window.
+					refreshNow();
+					render();
+				});
+			}
+			var onVis = function () { if (!document.hidden) refreshNow(); };
+			document.addEventListener("visibilitychange", onVis);
+
+			// Chart metric pickers: switch the first chart's data source per pane.
+			// The payload already carries every metric per trend point, so switching
+			// is a pure re-render with no refetch.
+			for (var ab = 0; ab < aPickBtns.length; ab++) {
+				aPickBtns[ab].addEventListener("click", function () {
+					var m = this.getAttribute("data-metric");
+					if (m === aMetric) return;
+					aMetric = m;
+					writeStore("ametric", aMetric);
+					render();
+				});
+			}
+			for (var sb = 0; sb < sPickBtns.length; sb++) {
+				sPickBtns[sb].addEventListener("click", function () {
+					var m = this.getAttribute("data-metric");
+					if (m === sMetric) return;
+					sMetric = m;
+					writeStore("smetric", sMetric);
+					render();
+				});
+			}
+
+			// Keyboard shortcuts: [ collapse, ] expand, r refresh, t cycle tabs (总消耗→会话→模型→DeepSeek), 0 总消耗 tab, f follow active, 1..9 pick session.
+			function onKey(ev) {
+				if (ev.defaultPrevented) return;
+				var t = ev.target;
+				// Don't fight with text inputs / the session select itself.
+				if (t && t.tagName) {
+					var tag = t.tagName;
+					if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+					if (t.isContentEditable) return;
+				}
+				if (ev.ctrlKey || ev.metaKey || ev.altKey) return;
+				if (ev.key === "[") { setCollapsed(true, false); ev.preventDefault(); }
+				else if (ev.key === "]") { setCollapsed(false, false); refreshNow(); ev.preventDefault(); }
+				else if (ev.key === "r" || ev.key === "R") { doRefresh(); ev.preventDefault(); }
+				else if (ev.key === "t" || ev.key === "T") {
+					var tIdx = TAB_ORDER.indexOf(tab);
+					tab = TAB_ORDER[(tIdx + 1) % TAB_ORDER.length];
+					writeStore("tab", tab);
+					if (tab === "session" && !follow && selId === "") {
+						follow = true;
+						writeStore("follow", "1");
+					}
+					render();
+					ev.preventDefault();
+				}
+				else if (ev.key === "0") {
+					// Switch to the 总消耗 (aggregate) tab.
+					tab = "all";
+					writeStore("tab", tab);
+					render();
+					ev.preventDefault();
+				}
+				else if (ev.key === "f" || ev.key === "F") {
+					follow = !follow;
+					writeStore("follow", follow ? "1" : "0");
+					if (follow) selId = "";
+					render();
+					ev.preventDefault();
+				}
+				else if (/^[1-9]$/.test(ev.key)) {
+					if (data && Array.isArray(data.sessions) && data.sessions[Number(ev.key) - 1]) {
+						follow = false;
+						writeStore("follow", "0");
+						selId = data.sessions[Number(ev.key) - 1].id;
+						writeStore("session", selId);
+						render();
+						ev.preventDefault();
+					}
+				}
+			}
+			document.addEventListener("keydown", onKey);
+
+			// ── lifecycle ───────────────────────────────────────────────────────
+			syncLayout();
+			render();
+			refreshNow();
+			timer = setInterval(refresh, refreshMs);
+
+			ctx.effect(function* () {
+				yield function dispose() {
+					clearInterval(timer);
+					head.removeEventListener("pointerdown", onPointerDown);
+					document.removeEventListener("visibilitychange", onVis);
+					document.removeEventListener("keydown", onKey);
+					if (root && root.parentNode) root.parentNode.removeChild(root);
+				};
+			}, "dsh-token-dashboard: widget");
+		}
+
+		exports.name = "dsh-token-dashboard";
+		exports.apply = apply;
+
+		return module.exports;
+	}
+});
+
+//# sourceMappingURL=client.js.map

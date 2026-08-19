@@ -1,0 +1,6 @@
+# Selftest scratch files.
+.balance-fixture.json
+.backfill-fixture/
+
+# Local runtime artifacts (never part of the plugin source).
+*.log

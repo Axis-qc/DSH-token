@@ -1,0 +1,33 @@
+{
+  "name": "dsh-token-dashboard",
+  "version": "0.1.0",
+  "description": "Collapsible live token dashboard for the DSH web GUI: token totals, cache hit rate, context occupancy, and per-turn usage trends.",
+  "type": "module",
+  "main": "index.js",
+  "types": "types.d.ts",
+  "exports": {
+    ".": {
+      "types": "./types.d.ts",
+      "default": "./index.js"
+    },
+    "./client": {
+      "default": "./client.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "client": {
+      "platform": "web"
+    }
+  },
+  "files": [
+    "index.js",
+    "client.js",
+    "types.d.ts",
+    "README.md"
+  ],
+  "license": "MIT",
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.1"
+  }
+}
