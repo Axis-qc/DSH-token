@@ -1,21 +1,19 @@
 #!/usr/bin/env node
 /**
- * install.mjs — idempotent installer for dsh-token-dashboard.
+ * install.mjs —— dsh-token-dashboard 的幂等安装脚本。
  *
- * Copies the plugin package into the web profile's node_modules, registers it
- * in the profile package.json dependencies, and appends the loader row to the
- * profile cordis.patch.yml. Safe to re-run (skips everything already in place;
- * re-copies sources so edits are redeployed).
+ * 把插件包复制到 web profile 的 node_modules，在 profile 的 package.json
+ * 依赖中注册它，并把加载行追加到 profile 的 cordis.patch.yml。可安全地重复
+ * 执行（已就位的内容会跳过；源码会重新复制，因此改动能被重新部署）。
  *
- * NOTE: this copies source → profile in ONE direction and overwrites whatever is
- * deployed. The source tree is the single source of truth and is version-
- * controlled on GitHub, so recovery is a git checkout rather than a local
- * backup. Edit the plugin HERE, never directly inside the profile.
+ * 注意：这是源码 → profile 的单向复制，会覆盖已部署的任何内容。源码树是唯一
+ * 可信来源，且已在 GitHub 上纳入版本控制，因此恢复手段是 git 检出而非本地
+ * 备份。请始终在源码树中修改插件，绝不要直接改 profile 里的副本。
  *
- * Usage:
+ * 用法：
  *   node _plugins/dsh-token-dashboard/install.mjs [profile-dir]
  *
- * profile-dir defaults to $DSH_HOME/profiles/web (or ~/.dsh/profiles/web).
+ * profile-dir 默认为 $DSH_HOME/profiles/web（或 ~/.dsh/profiles/web）。
  */
 import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, dirname, resolve } from "node:path";
@@ -61,32 +59,30 @@ function upsertPatchRow(profileDir) {
 	const existing = readFileSync(file, "utf8");
 	const markerIdx = existing.indexOf(BLOCK_MARKER);
 	if (markerIdx === -1) {
-		// Fresh install — append the new block.
+		// 全新安装 —— 直接追加新的配置块。
 		const sep = existing.endsWith("\n") ? "" : "\n";
 		writeFileSync(file, existing + sep + "\n" + NEW_BLOCK);
 		return { changed: true, mode: "appended" };
 	}
-	// Upgrade: locate the block bounds (from marker to next blank line + a non-marker line).
-	// The block ends at the first line that is empty or whitespace-only followed by a
-	// different entry; the simplest robust choice is to scan forward from the marker
-	// and cut at the next "# dsh-token-dashboard" / "- " / blank-line-then-non-block
-	// boundary. The previous block is exactly our marker + a `- insert:` until a blank
-	// line (then `\n# dsh-token-dashboard...` would start the next block, but we only
-	// have one). So we scan until a blank line OR end-of-file.
+	// 升级场景：定位配置块的边界（从标记行到下一个空行）。
+	// 配置块在第一个空行处结束。最稳妥的做法是从标记行往后扫描，在下一个空行
+	// 处截断。原有配置块的结构正好是「标记行 + 一个 `- insert:` 直到空行」
+	// （若有下一个块则以 `\n# dsh-token-dashboard...` 开头，但这里只会有一个）。
+	// 因此扫描到空行或文件末尾即可。
 	const start = markerIdx;
 	const afterMarker = existing.indexOf("\n", start) + 1;
 	let end = existing.length;
 	for (let i = afterMarker; i < existing.length; i++) {
-		// Cut at the first blank line (a line consisting only of whitespace).
+		// 在第一个空行处截断（整行只含空白字符）。
 		if (existing[i] === "\n" && (i + 1 === existing.length || existing[i + 1] === "\n")) {
 			end = i;
 			break;
 		}
 	}
 	const block = existing.slice(start, end);
-	// If the block already carries the base config keys, KEEP it verbatim —
-	// users may have added extra keys (e.g. deepseekApiKey / balanceRefreshMs /
-	// balanceFile) that a full template rewrite would silently wipe.
+	// 如果该配置块已包含基础配置键，就原样保留 —— 用户可能额外加了其他的
+	// 键（例如 deepseekApiKey / balanceRefreshMs / balanceFile），用模板整体
+	// 重写会把它们静默抹掉。
 	if (block.includes("apiPath:") && block.includes("seriesSize:")) {
 		return { changed: false, mode: "kept (user config preserved)" };
 	}

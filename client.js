@@ -1,15 +1,15 @@
 /*!
- * dsh-token-dashboard — browser half (self-contained bundle)
+ * dsh-token-dashboard — 浏览器端（自包含 bundle）
  *
- * A collapsible floating widget for the DSH web GUI. It polls the server side
- * (`GET /token-dashboard/api`) and renders token totals, cache-hit rate, context
- * occupancy and per-turn usage trends. It deliberately depends on NOTHING else
- * in the client module table (no React, no slots, no theme kit): a single
- * classic <script>-style factory whose only browser dependency is `fetch`.
+ * 一个可折叠的悬浮小窗，用于 DSH Web GUI。它轮询服务端
+ * (`GET /token-dashboard/api`) 并渲染 token 总量、缓存命中率、上下文
+ * 占用率以及逐轮用量趋势。它刻意不依赖客户端模块表中的任何其他东西
+ * （无 React、无 slots、无主题套件）：单一经典 <script> 风格工厂，
+ * 唯一的浏览器依赖是 `fetch`。
  *
- * The widget is draggable (pointer events), remembers its collapsed state and
- * position in localStorage, pauses polling while the tab is hidden, and is
- * fully removed again when the plugin fiber is disposed (HMR refresh safe).
+ * 小窗可拖拽（pointer 事件），在 localStorage 中记住折叠状态与
+ * 位置，标签页隐藏时暂停轮询，插件 fiber 被销毁时会将其完全移除
+ * （HMR 刷新安全）。
  */
 window.__ModuleLoader__.load({
 	id: "dsh-token-dashboard",
@@ -18,10 +18,10 @@ window.__ModuleLoader__.load({
 		var exports = module.exports;
 		Object.defineProperty(exports, Symbol.toStringTag, { value: "Module" });
 
-		//#region styles (injected once; owned by this plugin for HMR bookkeeping)
-		// A small SVG icon set inlined as background-mask URLs. They render at the
-		// current font color so a single `mask` + `background: currentColor` pair
-		// gives us tinted, anti-aliased glyphs without bundling extra assets.
+		//#region 样式（只注入一次；归本插件所有，便于 HMR 记账）
+		// 一组内联为 background-mask URL 的小型 SVG 图标。它们按当前字体颜色渲染，
+		// 因此仅凭 `mask` + `background: currentColor` 这对组合
+		// 就能得到带色调、抗锯齿的图形，无需打包额外资源。
 		var ICONS = {
 			in: "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><path d='M9.5 1.5l3.5 3.5H10v2h2.5l-3 3-1.06-1.06L10.94 8 8.5 5.56 9.5 4.5l3 3V3.5h-3V1.5zm-7 13h11v-2h-11v2z'/></svg>",
 			out: "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><path d='M6.5 14.5L3 11l3.5-3.5L8 9 5.06 11.94 7.5 14.5l-3 3V14h3v-.5zm-1-9V3h-2L0 0v-.5l3 3h-1V2z' transform='='translate(3,1)'/></svg>",
@@ -39,7 +39,7 @@ window.__ModuleLoader__.load({
 		};
 
 		var CSS = [
-			// ── design tokens ─────────────────────────────────────────────────
+			// ── 设计变量 ─────────────────────────────────────────────────
 			":host,dsh-token-dashboard{",
 			"  --tdb-font: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'PingFang SC', 'Microsoft YaHei', sans-serif;",
 			"  --tdb-mono: ui-monospace, SFMono-Regular, 'JetBrains Mono', Menlo, Consolas, monospace;",
@@ -49,7 +49,7 @@ window.__ModuleLoader__.load({
 			"  --tdb-pad-x: 14px;",
 			"  --tdb-pad-y: 12px;",
 			"  --tdb-gap: 10px;",
-			// dark theme (default — system-color-scheme light flips below)
+			// 深色主题（默认——系统配色为浅色时会在下方切换）
 			"  --tdb-bg: rgba(22, 22, 28, .82);",
 			"  --tdb-bg-elev: rgba(255, 255, 255, .045);",
 			"  --tdb-bg-cell: rgba(255, 255, 255, .04);",
@@ -87,13 +87,13 @@ window.__ModuleLoader__.load({
 			"    --tdb-shadow: 0 10px 32px rgba(15, 18, 35, .12), 0 2px 6px rgba(15, 18, 35, .06);",
 			"  }",
 			"}",
-			// ── root container ─────────────────────────────────────────────────
-			// `position: fixed` takes the element out of any ancestor flex/grid flow, so the
-			// panel can never be stretched to the full viewport (the "sticks to bottom /
-			// grows the page" symptom). `width/height: max-content` keeps the box at exactly
-			// its content size, and `pointer-events: none` lets clicks pass through the
-			// element entirely — only the panel child (which re-enables pointer events)
-			// is interactive, so no invisible region blocks the DSH UI underneath.
+			// ── 根容器 ─────────────────────────────────────────────────
+			// `position: fixed` 让元素脱离任何祖先 flex/grid 布局流，因此面板
+			// 永远不会被拉伸到整个视口（即「贴到底部 / 撑大页面」的症状）。
+			// `width/height: max-content` 让盒子的尺寸正好等于内容大小，
+			// `pointer-events: none` 让点击完全穿透该元素——只有面板子元素
+			// （它重新启用了 pointer 事件）是可交互的，因此不会有任何不可见区域
+			// 挡住下方的 DSH UI。
 			"dsh-token-dashboard{",
 			"  all: initial; display: block; position: fixed;",
 			"  right: 16px; bottom: 16px; z-index: 2147483000;",
@@ -104,7 +104,7 @@ window.__ModuleLoader__.load({
 			"  -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale;",
 			"}",
 			"dsh-token-dashboard *{{ box-sizing: border-box; margin: 0; padding: 0; }}",
-			// ── panel chrome ──────────────────────────────────────────────────
+			// ── 面板外壳 ──────────────────────────────────────────────────
 			"dsh-token-dashboard .tdb-panel{",
 			"  pointer-events: auto;",
 			"  min-width: 360px; max-width: 480px; width: 440px;",
@@ -114,7 +114,7 @@ window.__ModuleLoader__.load({
 			"  transition: border-color .15s ease, box-shadow .2s ease;",
 			"}",
 			"dsh-token-dashboard .tdb-panel:hover{ border-color: var(--tdb-border-strong); }",
-			// ── header ────────────────────────────────────────────────────────
+			// ── 头部 ────────────────────────────────────────────────────────
 			"dsh-token-dashboard .tdb-head{",
 			"  display: flex; align-items: center; gap: 10px;",
 			"  padding: 10px 12px; cursor: grab; user-select: none;",
@@ -130,7 +130,7 @@ window.__ModuleLoader__.load({
 			"  box-shadow: 0 0 8px var(--tdb-accent-cr); transition: background .3s ease, box-shadow .3s ease;",
 			"}",
 			"dsh-token-dashboard .tdb-dot.idle{ background: var(--tdb-fg-faint); box-shadow: none; }",
-			// collapsed summary in header
+			// 头部中折叠后的摘要
 			"dsh-token-dashboard .tdb-summary{",
 			"  flex: 1; text-align: right;",
 			"  font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;",
@@ -150,7 +150,7 @@ window.__ModuleLoader__.load({
 			"dsh-token-dashboard .tdb-summary .tdb-s-hit b{ color: var(--tdb-accent-cr); }",
 			"dsh-token-dashboard .tdb-summary .tdb-s-ctx{ border-color: transparent; background: rgba(247, 120, 186, .10); color: var(--tdb-accent-ctx); }",
 			"dsh-token-dashboard .tdb-summary .tdb-s-ctx b{ color: var(--tdb-accent-ctx); }",
-			// icon-style buttons
+			// 图标式按钮
 			"dsh-token-dashboard .tdb-btns{ display: flex; gap: 4px; flex: none; }",
 			"dsh-token-dashboard .tdb-btn{",
 			"  all: unset; cursor: pointer; width: 24px; height: 24px; border-radius: var(--tdb-radius-sm);",
@@ -174,7 +174,7 @@ window.__ModuleLoader__.load({
 			"@keyframes tdb-spin{ to { transform: rotate(360deg); } }",
 			"dsh-token-dashboard .tdb-btn.tdb-refresh.loading::before{ animation: tdb-spin .7s linear infinite; }",
 			"dsh-token-dashboard[aria-collapsed='true'] .tdb-toggle::before{ transform: rotate(-90deg); }",
-			// body
+			// 主体
 			"dsh-token-dashboard .tdb-body[hidden]{ display: none !important; }",
 			"dsh-token-dashboard .tdb-body{",
 			"  padding: var(--tdb-pad-y) var(--tdb-pad-x);",
@@ -184,15 +184,15 @@ window.__ModuleLoader__.load({
 			"}",
 			"dsh-token-dashboard .tdb-body::-webkit-scrollbar{ width: 6px; }",
 			"dsh-token-dashboard .tdb-body::-webkit-scrollbar-thumb{ background: var(--tdb-border-strong); border-radius: 3px; }",
-			// totals grid
+			// 总量网格
 			"dsh-token-dashboard .tdb-grid{ display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }",
-			// the API-call counter is a full-width row under the 3-column totals grid
+			// API 调用计数器是三列总量网格下方的一整行
 			"dsh-token-dashboard .tdb-grid .tdb-c-calls{",
 			"  grid-column: 1 / -1;",
 			"  flex-direction: row; align-items: baseline; justify-content: space-between; gap: 8px;",
 			"}",
 			"dsh-token-dashboard .tdb-grid .tdb-c-calls span{ font-size: 10px; }",
-			// time-window filter (segmented control above the totals grid)
+			// 时间窗口筛选（总量网格上方的分段控件）
 			"dsh-token-dashboard .tdb-range{",
 			"  display: flex; align-items: center; gap: 4px;",
 			"  background: var(--tdb-bg-cell); border: 1px solid var(--tdb-border); border-radius: var(--tdb-radius-sm);",
@@ -207,7 +207,7 @@ window.__ModuleLoader__.load({
 			"dsh-token-dashboard .tdb-range button.active{",
 			"  background: var(--tdb-fg); color: var(--tdb-bg); font-weight: 600;",
 			"}",
-			// totals grid
+			// 总量网格
 			"dsh-token-dashboard .tdb-cell{",
 			"  background: var(--tdb-bg-cell); border-radius: var(--tdb-radius-sm);",
 			"  padding: 8px 10px; display: flex; flex-direction: column; gap: 2px;",
@@ -246,7 +246,7 @@ window.__ModuleLoader__.load({
 			"dsh-token-dashboard .tdb-cell.tdb-c-calls{ border-left-color: var(--tdb-accent-calls); }",
 			"dsh-token-dashboard .tdb-cell.tdb-c-calls .tdb-i{ -webkit-mask-image: " + ICON_DATA_URI(ICONS.calls) + "; mask-image: " + ICON_DATA_URI(ICONS.calls) + "; color: var(--tdb-accent-calls); }",
 			"dsh-token-dashboard .tdb-cell.tdb-c-calls b{ color: var(--tdb-accent-calls); }",
-			// chart metric picker (segmented control inside a chart label row)
+			// 图表指标选择器（图表标签行内的分段控件）
 			"dsh-token-dashboard .tdb-mpick{ display: inline-flex; align-items: center; gap: 2px; }",
 			"dsh-token-dashboard .tdb-mpick button{",
 			"  all: unset; cursor: pointer; padding: 1px 7px; border-radius: 4px;",
@@ -256,7 +256,7 @@ window.__ModuleLoader__.load({
 			"}",
 			"dsh-token-dashboard .tdb-mpick button:hover{ color: var(--tdb-fg); background: var(--tdb-bg-cell-hover); }",
 			"dsh-token-dashboard .tdb-mpick button.active{ background: var(--tdb-fg); color: var(--tdb-bg); font-weight: 600; }",
-			// charts
+			// 图表
 			"dsh-token-dashboard .tdb-chart{",
 			"  display: flex; flex-direction: column; gap: 6px;",
 			"  background: var(--tdb-bg-chart); border-radius: var(--tdb-radius-sm);",
@@ -288,7 +288,7 @@ window.__ModuleLoader__.load({
 			"dsh-token-dashboard .tdb-tip .tdb-tip-time { color: var(--tdb-fg-muted); font-size: 10px; display: block; }",
 			"dsh-token-dashboard svg.tdb-svg .tdb-cursor{ stroke: var(--tdb-fg-muted); stroke-width: 1; stroke-dasharray: 2 2; opacity: 0; transition: opacity .12s ease; }",
 			"dsh-token-dashboard svg.tdb-svg .tdb-cursor.show{ opacity: .5; }",
-			// footer
+			// 页脚
 			"dsh-token-dashboard .tdb-selrow{ display: flex; flex: none; }",
 			"dsh-token-dashboard .tdb-tabs{",
 			"  display: flex; gap: 4px; flex: none; align-self: flex-start;",
@@ -304,7 +304,7 @@ window.__ModuleLoader__.load({
 			"dsh-token-dashboard .tdb-tabs button.active{ background: var(--tdb-fg); color: var(--tdb-bg); font-weight: 600; }",
 			"dsh-token-dashboard .tdb-pane{ display: flex; flex-direction: column; gap: var(--tdb-gap); }",
 			"dsh-token-dashboard .tdb-pane[hidden]{ display: none !important; }",
-			// model pane (per-model consumption cards)
+			// 模型面板（按模型的消耗卡片）
 			"dsh-token-dashboard .tdb-mlist{ display: flex; flex-direction: column; gap: 8px; }",
 			"dsh-token-dashboard .tdb-mcard{",
 			"  background: var(--tdb-bg-cell); border: 1px solid var(--tdb-border); border-radius: var(--tdb-radius-sm);",
@@ -334,7 +334,7 @@ window.__ModuleLoader__.load({
 			"  display: block; height: 100%; background: linear-gradient(90deg, var(--tdb-accent-in), var(--tdb-accent-out));",
 			"  border-radius: 2px;",
 			"}",
-			// DeepSeek balance pane
+			// DeepSeek 余额面板
 			"dsh-token-dashboard .tdb-ds-note{",
 			"  font-size: 11px; color: var(--tdb-fg-muted); padding: 10px 8px;",
 			"  border: 1px dashed var(--tdb-border-strong); border-radius: var(--tdb-radius-sm);",
@@ -377,14 +377,14 @@ window.__ModuleLoader__.load({
 		}
 		//#endregion
 
-		//#region helpers
-		/** Escape HTML metacharacters in text (defensive; all data is numeric anyway). */
+		//#region 辅助函数
+		/** 转义文本中的 HTML 元字符（防御性；反正所有数据都是数值）。 */
 		function esc(value) {
 			return String(value).replace(/[&<>"']/g, function (c) {
 				return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
 			});
 		}
-		/** Compact token formatting: 1.2K / 3.4M / 517. */
+		/** 紧凑的 token 格式化：1.2K / 3.4M / 517。 */
 		function fmt(n) {
 			var v = typeof n === "number" && Number.isFinite(n) ? n : 0;
 			var abs = Math.abs(v);
@@ -393,7 +393,7 @@ window.__ModuleLoader__.load({
 			if (abs >= 1e3) return sign + (abs / 1e3).toFixed(1).replace(/\.0$/, "") + "K";
 			return sign + Math.round(abs) + "";
 		}
-		/** Percentage string with 1 decimal (null → "—"). */
+		/** 保留 1 位小数的百分比字符串（null → "—"）。 */
 		function pct(value, digits) {
 			if (typeof value !== "number" || !Number.isFinite(value)) return "—";
 			return value.toFixed(digits == null ? 1 : digits) + "%";
@@ -403,19 +403,19 @@ window.__ModuleLoader__.load({
 			var p = function (x) { return (x < 10 ? "0" : "") + x; };
 			return p(d.getHours()) + ":" + p(d.getMinutes()) + ":" + p(d.getSeconds());
 		}
-		/** Hourly timestamp: "M/D HH:00". */
+		/** 按小时的时间戳："M/D HH:00"。 */
 		function dtHour(ms) {
 			var d = new Date(ms);
 			var p = function (x) { return (x < 10 ? "0" : "") + x; };
 			return (d.getMonth() + 1) + "/" + d.getDate() + " " + p(d.getHours()) + ":00";
 		}
-		/** Minute timestamp: "HH:MM" (used by the 1h range's per-minute series). */
+		/** 按分钟的时间戳："HH:MM"（用于 1h 时间范围的逐分钟序列）。 */
 		function dtMin(ms) {
 			var d = new Date(ms);
 			var p = function (x) { return (x < 10 ? "0" : "") + x; };
 			return p(d.getHours()) + ":" + p(d.getMinutes());
 		}
-		/** Clamp to the viewport so a dragged widget can never be lost off-screen. */
+		/** 限制在视口内，保证拖拽的小窗永远不会被拖出屏幕外。 */
 		function clampRect(rect) {
 			rect.x = Math.max(4, Math.min(rect.x, (window.innerWidth || 1200) - 60));
 			rect.y = Math.max(4, Math.min(rect.y, (window.innerHeight || 800) - 40));
@@ -432,17 +432,16 @@ window.__ModuleLoader__.load({
 		function writeStore(key, value) {
 			try {
 				window.localStorage.setItem("dsh-token-dashboard:" + key, String(value));
-			} catch { /* storage unavailable — ignore */ }
+			} catch { /* 存储不可用——忽略 */ }
 		}
 		//#endregion
 
-		//#region charts
+		//#region 图表
 		/**
-		 * Downsample to at most 64 points by UNIFORM sampling across the whole
-		 * series (first and last kept), then build a polyline "d". Uniform
-		 * sampling keeps long continuous hour-series showing the full trend
-		 * instead of only the newest tail. Flat / empty series render as a
-		 * mid-line so charts never divide by zero.
+		 * 用跨整个序列的均匀采样把数据点降到最多 64 个（首尾保留），
+		 * 然后构建 polyline 的 "d" 路径。均匀采样能让较长的连续小时序列
+		 * 呈现完整趋势，而不只是最新的尾部。平坦/空序列渲染为中位线，
+		 * 这样图表永远不会出现除零。
 		 */
 		function sparkPath(values, width, height, pad, baseline) {
 			var pts = values.map(function (v) { return typeof v === "number" && Number.isFinite(v) ? v : 0; });
@@ -474,7 +473,7 @@ window.__ModuleLoader__.load({
 			var area = line + " L" + (pad + innerW).toFixed(1) + " " + base.toFixed(1) + " L" + pad.toFixed(1) + " " + base.toFixed(1) + " Z";
 			return { d: line, area: area };
 		}
-		/** SVG HTML for one sparkline (line + optional translucent area). */
+		/** 单个 sparkline 的 SVG HTML（折线 + 可选的半透明面积）。 */
 		function sparkSvg(values, opts) {
 			var W = 320, H = 46, P = 3, base = opts && opts.baseline;
 			var path = sparkPath(values, W, H, P, base);
@@ -489,7 +488,7 @@ window.__ModuleLoader__.load({
 		//#endregion
 
 		/**
-		 * Plugin apply — build the widget on the client root context.
+		 * 插件 apply——在客户端根上下文上构建小窗。
 		 * @param {import('@deepseek-ai/cordis').Context} ctx
 		 * @param {Record<string, unknown>} [config]
 		 */
@@ -498,18 +497,18 @@ window.__ModuleLoader__.load({
 			var apiPath = typeof config.apiPath === "string" && config.apiPath !== "" ? config.apiPath : "/token-dashboard/api";
 			var refreshMs = Number(config.refreshMs) > 0 ? Number(config.refreshMs) : 2500;
 
-			var data = null;        // last successful payload
-			var error = null;       // last fetch error text
+			var data = null;        // 最近一次成功的 payload
+			var error = null;       // 最近一次 fetch 的错误文本
 			var collapsed = readStore("collapsed", "1") === "1";
 			var range = readStore("range", "all");
 			if (["all", "30d", "7d", "1d", "1h"].indexOf(range) === -1) range = "all";
-			var pos = null;         // dragged {x,y}; null → default corner
+			var pos = null;         // 拖拽位置 {x,y}；null → 默认角落
 			try {
 				var rawPos = readStore("pos", "");
 				if (rawPos) pos = clampRect(JSON.parse(rawPos));
 			} catch { pos = null; }
 
-			// ── build the DOM skeleton ─────────────────────────────────────────
+			// ── 构建 DOM 骨架 ─────────────────────────────────────────
 			var root = document.createElement("dsh-token-dashboard");
 			root.innerHTML = [
 				"<div class=\"tdb-panel\">",
@@ -637,10 +636,10 @@ window.__ModuleLoader__.load({
 			var c1leg = root.querySelector(".tdb-c1-legend");
 			var c2leg = root.querySelector(".tdb-c2-legend");
 			var selId = readStore("session", "");
-			/** Follow the most recently active session automatically (default on). */
+			/** 自动跟随最近活动的会话（默认开启）。 */
 			var follow = readStore("follow", "1") === "1";
-			/** Active view: "all" = 总消耗 (aggregate), "session" = per-session,
-			 *  "model" = per-model consumption, "deepseek" = official balance. */
+			/** 活动视图："all" = 总消耗（聚合），"session" = 按会话，
+			 *  "model" = 按模型消耗，"deepseek" = 官方余额。 */
 			var tab = readStore("tab", "session");
 			if (tab !== "all" && tab !== "session" && tab !== "model" && tab !== "deepseek") tab = "session";
 			var TAB_ORDER = ["all", "session", "model", "deepseek"];
@@ -670,8 +669,8 @@ window.__ModuleLoader__.load({
 			var ac2Tip = ac2Wrap.querySelector(".tdb-tip");
 			var ac1leg = root.querySelector(".tdb-ac1l");
 			var ac2leg = root.querySelector(".tdb-ac2l");
-			/** Metric shown by the FIRST chart of the 总消耗 / 会话 panes. Each pane
-			 *  keeps its own choice, persisted like every other view preference. */
+			/** 总消耗 / 会话两个面板中第一个图表显示的指标。每个面板
+			 *  保留各自的选择，与其他视图偏好一样持久化。 */
 			var METRICS = ["out", "in", "cr", "total", "calls"];
 			var aMetric = readStore("ametric", "out");
 			var sMetric = readStore("smetric", "out");
@@ -680,9 +679,9 @@ window.__ModuleLoader__.load({
 			var aPickBtns = root.querySelectorAll(".tdb-apick button");
 			var sPickBtns = root.querySelectorAll(".tdb-spick button");
 
-			/** Per-metric chart config: how to pull the value out of one trend point,
-			 *  its accent color, unit, and tooltip wording. Keeps the two panes'
-			 *  first chart identical in behaviour while the data source varies. */
+			/** 每个指标的图表配置：如何从一个趋势点取值、
+			 *  对应的强调色、单位以及 tooltip 文案。在数据源变化时，
+			 *  保持两个面板的第一个图表行为一致。 */
 			var METRIC_DEFS = {
 				out: { label: "输出", color: "var(--tdb-accent-out)", unit: "tok", pick: function (s) { return s.out; } },
 				in: { label: "输入 · uncached", color: "var(--tdb-accent-in)", unit: "tok", pick: function (s) { return s.in; } },
@@ -691,7 +690,7 @@ window.__ModuleLoader__.load({
 				calls: { label: "API 调用次数", color: "var(--tdb-accent-calls)", unit: "次", pick: function (s) { return typeof s.calls === "number" ? s.calls : 0; } },
 			};
 
-			/** Render the switchable first chart for one pane. */
+			/** 渲染某个面板可切换的第一个图表。 */
 			function renderMetricChart(container, legendEl, series, metric) {
 				var def = METRIC_DEFS[metric] || METRIC_DEFS.out;
 				var vals = series.map(def.pick);
@@ -713,8 +712,8 @@ window.__ModuleLoader__.load({
 				});
 			}
 
-			/** Apply stored position / collapse. The root custom element carries the
-			 *  fixed positioning; the panel is its (pointer-events:auto) child. */
+			/** 应用已保存的位置/折叠状态。根自定义元素承担
+			 *  fixed 定位；面板是它的（pointer-events:auto）子元素。 */
 			function syncLayout() {
 				root.style.left = pos ? Math.round(pos.x) + "px" : "";
 				root.style.top = pos ? Math.round(pos.y) + "px" : "";
@@ -738,14 +737,14 @@ window.__ModuleLoader__.load({
 
 			function setError(message) {
 				error = message || null;
-				// Rendered as a red 「连接失败」 badge by render(); keep tooltip detail.
+				// 由 render() 渲染为红色「连接失败」徽章；此处保留 tooltip 详情。
 				statusEl.title = error ? String(error) : "";
 				render();
 			}
 
-			/** The session to display; null → global "all sessions" view.
-			 *  Follow mode pins the most recently active session (server's
-			 *  `activeId`); a manual pick overrides follow entirely. */
+			/** 要显示的会话；null → 全局「全部会话」视图。
+			 *  跟随模式固定到最近活动的会话（服务端的 `activeId`）；
+			 *  手动选择会完全覆盖跟随模式。 */
 			function findSession(id) {
 				if (!id || !data || !Array.isArray(data.sessions)) return null;
 				for (var i = 0; i < data.sessions.length; i++) if (data.sessions[i].id === id) return data.sessions[i];
@@ -754,14 +753,14 @@ window.__ModuleLoader__.load({
 			function selectedSession() {
 				if (!data || !Array.isArray(data.sessions) || data.sessions.length === 0) return null;
 				if (follow) {
-					// Follow the session the user is actively talking to; if it fell
-					// outside the selected time range, show the global aggregate.
+					// 跟随用户当前正在对话的会话；如果它落在了
+					// 所选时间范围之外，则显示全局聚合数据。
 					return findSession(data.activeId) || null;
 				}
 				return findSession(selId);
 			}
 
-			/** Build the pill chips shown in the collapsed summary. */
+			/** 构建折叠摘要中显示的胶囊徽章。 */
 			function renderSummaryChips(totals, hit, occupancy) {
 				var out = totals.output || 0;
 				var parts = [
@@ -776,7 +775,7 @@ window.__ModuleLoader__.load({
 				return parts.join("");
 			}
 
-			/** Render a single sparkline chart with hover tooltip + cursor. */
+			/** 渲染单个带悬停 tooltip + 光标的 sparkline 图表。 */
 			function renderChart(container, legendEl, values, opts) {
 				legendEl.textContent = opts.legend || "";
 				if (values.length < 2) {
@@ -786,7 +785,7 @@ window.__ModuleLoader__.load({
 				container.innerHTML = sparkSvg(values, { color: opts.color, baseline: opts.min });
 				var svg = container.querySelector("svg.tdb-svg");
 				if (!svg) return;
-				// Inject a dashed cursor line that follows the mouse.
+				// 注入一条跟随鼠标移动的虚线光标。
 				var ns = "http://www.w3.org/2000/svg";
 				var cursor = document.createElementNS(ns, "line");
 				var vb = svg.getAttribute("viewBox").split(" ").map(Number);
@@ -825,14 +824,14 @@ window.__ModuleLoader__.load({
 				svg.addEventListener("touchend", onLeave);
 			}
 
-			/** Range-aware time-axis label: minutes for the 1h range, hours otherwise. */
+			/** 感知时间范围的横轴标签：1h 范围用分钟，其余用小时。 */
 			var tf = function (ms) { return range === "1h" ? dtMin(ms) : dtHour(ms); };
-			/** Trend-point unit label: "分" for the 1h range, "时" otherwise. */
+			/** 趋势点单位标签：1h 范围用「分」，否则用「时」。 */
 			var slotUnit = range === "1h" ? " 分" : " 时";
 
-			/** Render the 总消耗 (aggregate) pane: direct sums for cumulative fields,
-			 *  weighted total hit-rate, and no context occupancy (an instantaneous
-			 *  per-session metric that has no meaningful total). */
+			/** 渲染总消耗（聚合）面板：累计字段直接求和、
+			 *  加权总命中率，不含上下文占用率（这是瞬时性的
+			 *  按会话指标，没有有意义的合计值）。 */
 			function renderPaneAll() {
 				if (!data || !data.totals) {
 					for (var k in aels) aels[k].textContent = "—";
@@ -858,14 +857,14 @@ window.__ModuleLoader__.load({
 				aels.ctx.textContent = "—";
 				aels.ctx.parentElement.title = "上下文占用是单会话实时状态,不参与总量统计";
 				var series = Array.isArray(data.series) ? data.series : [];
-				// API calls in the window: exact count of assistant/message events.
+				// 时间窗口内的 API 调用次数：assistant/消息事件的精确计数。
 				var aCalls = typeof t.calls === "number" ? t.calls : null;
 				aels.calls.textContent = aCalls === null ? "—" : String(aCalls);
 				aels.calls.parentElement.title = aCalls === null
 					? "数据源未上报调用次数"
 					: "当前时间范围内所有会话的 API 调用次数(每次模型回复计 1 次)";
-				// Total consumption = uncached input + output only (cache read/write
-				// are discounted/zero-priced, so they are excluded from the burn).
+				// 总消耗 = 仅 uncached 输入 + 输出（缓存读写
+				// 已打折/零计价，因此不纳入消耗统计）。
 				var totalVals = series.map(function (s) { return s.in + s.out; });
 				renderMetricChart(ac1, ac1leg, series, aMetric);
 				renderChart(ac2, ac2leg, totalVals, {
@@ -882,7 +881,7 @@ window.__ModuleLoader__.load({
 				});
 			}
 
-			/** Render the 会话 pane for one session. */
+			/** 渲染某个会话的会话面板。 */
 			function renderPaneSession(session) {
 				if (!data || !data.totals || !session) {
 					dot.className = "tdb-dot idle";
@@ -916,13 +915,13 @@ window.__ModuleLoader__.load({
 				els.ctx.textContent = occupancy === null
 					? "—"
 					: fmt(context.projectedTokens) + " / " + fmt(context.contextWindow) + "  " + occupancy.toFixed(0) + "%";
-				// API calls for THIS session inside the window.
+				// 时间窗口内本会话的 API 调用次数。
 				var sCalls = typeof totals.calls === "number" ? totals.calls : null;
 				els.calls.textContent = sCalls === null ? "—" : String(sCalls);
 				els.calls.parentElement.title = sCalls === null
 					? "数据源未上报调用次数"
 					: "当前时间范围内本会话的 API 调用次数(每次模型回复计 1 次)";
-				// Total consumption = uncached input + output only.
+				// 总消耗 = 仅 uncached 输入 + 输出。
 				var totalVals = series.map(function (s) { return s.in + s.out; });
 				renderMetricChart(c1, c1leg, series, sMetric);
 				renderChart(c2, c2leg, totalVals, {
@@ -939,8 +938,8 @@ window.__ModuleLoader__.load({
 				});
 			}
 
-			/** Render the 模型 pane: one card per provider/model with its in-window
-			 *  token breakdown, share of total burn, and cache-hit rate. */
+			/** 渲染模型面板：每个 provider/模型一张卡片，展示窗口内
+			 *  token 明细、占总体消耗的比例以及缓存命中率。 */
 			function renderPaneModel() {
 				var models = data && Array.isArray(data.models) ? data.models : [];
 				if (models.length === 0) {
@@ -977,9 +976,8 @@ window.__ModuleLoader__.load({
 				mlistEl.innerHTML = cards.join("");
 			}
 
-			/** Render the DeepSeek pane: official account balance (or a setup/error
-			 *  notice when no key is configured or the fetch failed), balance drop
-			 *  over trailing windows, and a balance-over-time curve. */
+			/** 渲染 DeepSeek 面板：官方账户余额（未配置密钥或 fetch 失败时
+			 *  显示配置/错误提示）、各时间窗的余额降幅，以及余额随时间变化的曲线。 */
 			function renderPaneDeepseek() {
 				var b = data && data.balance ? data.balance : null;
 				var v = { total: "—", granted: "—", topped: "—" };
@@ -992,8 +990,8 @@ window.__ModuleLoader__.load({
 				dsEls.total.textContent = v.total;
 				dsEls.granted.textContent = v.granted;
 				dsEls.topped.textContent = v.topped;
-				// Balance drop over the trailing windows (¥, negative = balance went
-				// up, e.g. a recharge/grant landed mid-window).
+				// 各时间窗内的余额降幅（¥，负值表示余额增加，
+				// 例如窗口中途有充值/赠送到账）。
 				var c = b && b.consumed ? b.consumed : null;
 				var cKeys = [["h1", "近1小时"], ["d1", "近24小时"], ["d7", "近7天"], ["all", "自监控以来"]];
 				for (var ci = 0; ci < cKeys.length; ci++) {
@@ -1024,7 +1022,7 @@ window.__ModuleLoader__.load({
 					dsNote.textContent = "已连接 DeepSeek 官方 API · 币种 " + cur + " · " + avail + " · 消耗为余额差额的近似值，以官方账单为准";
 					dsNote.className = "tdb-ds-note ok";
 				}
-				// Balance-over-time curve from the history samples.
+				// 根据历史样本绘制的余额随时间变化曲线。
 				var hist = b && Array.isArray(b.history) ? b.history : [];
 				var vals = [];
 				for (var hi = 0; hi < hist.length; hi++) {
@@ -1079,7 +1077,7 @@ window.__ModuleLoader__.load({
 				dsMeta.textContent = b && b.fetchedAt ? "上次获取 " + clock(b.fetchedAt) + " · 每 30 分钟采样 · 历史已持久化，重启保留" : "—";
 			}
 
-			/** Re-render everything from `data`. */
+			/** 根据 `data` 重新渲染所有内容。 */
 			function render() {
 				if (error) {
 					statusEl.textContent = "连接失败";
@@ -1111,13 +1109,13 @@ window.__ModuleLoader__.load({
 				paneModel.hidden = tab !== "model";
 				paneDeepseek.hidden = tab !== "deepseek";
 
-				var session = selectedSession(); // session pane's current session (or null)
+				var session = selectedSession(); // 会话面板当前的会话（或 null）
 				renderPaneAll();
 				renderPaneSession(session);
 				renderPaneModel();
 				renderPaneDeepseek();
 
-				// Header summary follows whichever tab is active.
+				// 头部摘要跟随当前活动的标签页。
 				var totals, hit, occupancy;
 				if (tab === "all" && data && data.totals) {
 					totals = data.totals;
@@ -1128,7 +1126,7 @@ window.__ModuleLoader__.load({
 					fUpdated.textContent = "全部会话 · " + fmt(totals.output || 0) + " tok";
 					fUpdated.title = "";
 				} else if (tab === "model") {
-					// Model tab header: top model + its burn; footer = model count.
+					// 模型标签页头部：最顶层模型 + 其消耗；页脚 = 模型数量。
 					var mods = data && Array.isArray(data.models) ? data.models : [];
 					if (mods.length > 0) {
 						var mTop = mods[0];
@@ -1147,7 +1145,7 @@ window.__ModuleLoader__.load({
 						fUpdated.title = "";
 					}
 				} else if (tab === "deepseek") {
-					// DeepSeek tab header: official account balance (+ config state).
+					// DeepSeek 标签页头部：官方账户余额（+ 配置状态）。
 					var db = data && data.balance ? data.balance : null;
 					var dTotal = null;
 					if (db && db.ok && Array.isArray(db.infos) && db.infos.length > 0) {
@@ -1185,9 +1183,9 @@ window.__ModuleLoader__.load({
 				updateSelect();
 			}
 
-			/** Human-readable session label for the picker: derived title (first user
-			 *  message) → cwd basename → sequential number, with a short id suffix
-			 *  and optional preset tag to disambiguate. */
+			/** 供选择器使用的人类可读会话标签：派生的标题（首条用户消息）→
+			 *  cwd 的 basename → 序号，并附上短 id 后缀
+			 *  以及可选的预设标签以消除歧义。 */
 			function sessionLabel(s, i) {
 				var base = "";
 				if (typeof s.title === "string" && s.title !== "") {
@@ -1223,7 +1221,7 @@ window.__ModuleLoader__.load({
 				if (selEl.innerHTML !== html) selEl.innerHTML = html;
 			}
 
-			// ── data ────────────────────────────────────────────────────────────
+			// ── 数据 ────────────────────────────────────────────────────────────
 			var fetching = null;
 			var timer = null;
 
@@ -1255,8 +1253,8 @@ window.__ModuleLoader__.load({
 				refresh();
 			}
 
-			/** Manual refresh — fetch immediately (bypasses the poll interval) with
-			 *  a short spinning affordance on the refresh button. */
+			/** 手动刷新——立即 fetch（绕过轮询间隔），
+			 *  刷新按钮上短暂显示旋转动画作为反馈。 */
 			var refreshTick = 0;
 			function doRefresh() {
 				refreshBtn.classList.add("loading");
@@ -1268,7 +1266,7 @@ window.__ModuleLoader__.load({
 				refreshNow();
 			}
 
-			// ── interactions ────────────────────────────────────────────────────
+			// ── 交互 ────────────────────────────────────────────────────
 			var head = root.querySelector(".tdb-head");
 			var drag = null;
 
@@ -1315,7 +1313,7 @@ window.__ModuleLoader__.load({
 				} else {
 					follow = false;
 					writeStore("follow", "0");
-					selId = v; // a concrete session id
+					selId = v; // 一个具体的会话 id
 					writeStore("session", selId);
 				}
 				render();
@@ -1327,7 +1325,7 @@ window.__ModuleLoader__.load({
 					tab = t;
 					writeStore("tab", tab);
 					if (tab === "session" && !follow && selId === "") {
-						// Entering the session view with nothing pinned → follow the active one.
+						// 进入会话视图但未固定任何会话 → 跟随当前活动的会话。
 						follow = true;
 						writeStore("follow", "1");
 					}
@@ -1340,7 +1338,7 @@ window.__ModuleLoader__.load({
 					if (r === range) return;
 					range = r;
 					writeStore("range", range);
-					// Range changed — refresh immediately with the new window.
+					// 时间范围已变化——立即用新的窗口刷新。
 					refreshNow();
 					render();
 				});
@@ -1348,9 +1346,9 @@ window.__ModuleLoader__.load({
 			var onVis = function () { if (!document.hidden) refreshNow(); };
 			document.addEventListener("visibilitychange", onVis);
 
-			// Chart metric pickers: switch the first chart's data source per pane.
-			// The payload already carries every metric per trend point, so switching
-			// is a pure re-render with no refetch.
+			// 图表指标选择器：按面板切换第一个图表的数据源。
+			// payload 已携带每个趋势点的所有指标，因此切换
+			// 只是纯粹的重新渲染，无需重新请求。
 			for (var ab = 0; ab < aPickBtns.length; ab++) {
 				aPickBtns[ab].addEventListener("click", function () {
 					var m = this.getAttribute("data-metric");
@@ -1370,11 +1368,11 @@ window.__ModuleLoader__.load({
 				});
 			}
 
-			// Keyboard shortcuts: [ collapse, ] expand, r refresh, t cycle tabs (总消耗→会话→模型→DeepSeek), 0 总消耗 tab, f follow active, 1..9 pick session.
+			// 键盘快捷键：[ 折叠，] 展开，r 刷新，t 循环标签页（总消耗→会话→模型→DeepSeek），0 总消耗标签，f 跟随活动会话，1..9 选择会话。
 			function onKey(ev) {
 				if (ev.defaultPrevented) return;
 				var t = ev.target;
-				// Don't fight with text inputs / the session select itself.
+				// 不与文本输入框 / 会话下拉框本身发生冲突。
 				if (t && t.tagName) {
 					var tag = t.tagName;
 					if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
@@ -1396,7 +1394,7 @@ window.__ModuleLoader__.load({
 					ev.preventDefault();
 				}
 				else if (ev.key === "0") {
-					// Switch to the 总消耗 (aggregate) tab.
+					// 切换到总消耗（聚合）标签页。
 					tab = "all";
 					writeStore("tab", tab);
 					render();
@@ -1422,7 +1420,7 @@ window.__ModuleLoader__.load({
 			}
 			document.addEventListener("keydown", onKey);
 
-			// ── lifecycle ───────────────────────────────────────────────────────
+			// ── 生命周期 ───────────────────────────────────────────────────────
 			syncLayout();
 			render();
 			refreshNow();

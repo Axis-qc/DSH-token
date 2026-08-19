@@ -1,48 +1,28 @@
 # dsh-token-dashboard
 
-A dual-face DSH plugin that adds a **collapsible, draggable mini-window** to the
-web GUI showing live token consumption, cache hit rate, context occupancy, and
-per-step usage trends — both for the active session **and** for every other
-session already on disk.
+一个双端 DSH 插件，在 Web GUI 中加入一个**可折叠、可拖动的悬浮小窗**，实时显示 token 消耗、缓存命中率、上下文占用与分步用量趋势 —— 既覆盖当前进行中的会话，**也**覆盖磁盘上已有的所有历史会话。
 
-- **Server half** (`index.js`) listens on the committed session event stream
-  and folds it into per-session token totals + a per-hour trend series. On
-  startup (and every 5 minutes after) it asynchronously replays every durable
-  `.jsonl.zstd` session log under `$DSH_HOME/sessions`, so a fresh dsh web boot
-  shows historical usage for sessions that already exist on disk — not just
-  ones created live after the plugin loaded.
-- **Browser half** (`client.js`) is a fully self-contained bundle (no React, no
-  slots, no theme kit — just `fetch` + DOM + SVG). It renders a fixed-position
-  widget that can be collapsed to a one-line summary, dragged around the page,
-  and expanded to show totals, charts, a time-window filter, and a session
-  picker.
+- **服务端（`index.js`）** 订阅已落盘的会话事件流，将其折叠为每会话的 token 累计值与按小时的趋势序列。插件加载时（以及之后每 5 分钟）会异步重放 `$DSH_HOME/sessions` 下所有持久化的 `.jsonl.zstd` 会话日志，因此 dsh web 冷启动后即可看到磁盘上既有会话的历史用量，而不只是插件加载之后新建的会话。
+- **浏览器端（`client.js`）** 是完全自包含的 bundle（不依赖 React、不用插槽、不用主题工具库 —— 只有 `fetch` + DOM + SVG）。它渲染一个固定定位的小窗，可折叠为单行摘要、可在页面上拖动，展开后显示汇总数值、图表、时间窗口筛选器与会话选择器。
 
-## Install
+## 安装
 
-The package must be resolvable from the web profile's `node_modules`. From the
-repo root of this workspace:
+该包必须能从 web profile 的 `node_modules` 中被解析到。在本工作区的仓库根目录执行：
 
 ```sh
 node _plugins/dsh-token-dashboard/install.mjs
 ```
 
-The installer copies the package into `$DSH_HOME/profiles/web/node_modules/`,
-registers it in the profile `package.json` dependencies, and **upserts**
-(idempotent) the loader row in `cordis.patch.yml`. Re-run any time you edit
-sources to redeploy. Then **restart dsh web** (plugin-set changes take effect
-on restart):
+安装脚本会把整个包复制到 `$DSH_HOME/profiles/web/node_modules/`，在 profile 的 `package.json` 依赖中注册它，并**幂等地更新**（upsert）`cordis.patch.yml` 中的加载行。每次改动源码后重新执行即可重新部署。之后需要**重启 dsh web**（插件集变更仅在重启时生效）：
 
 ```
-# in the start-web console window:
+# 在 start-web 控制台窗口中输入：
 restart
 ```
 
-> The installer overwrites the deployed copy in one direction. **Edit the plugin
-> in this source tree, never directly inside the profile** — the source tree is
-> the single source of truth and is version-controlled, so recovery is a git
-> checkout.
+> 安装脚本是单向覆盖部署。**请始终在本源码树中修改插件，绝不要直接编辑 profile 里的副本** —— 源码树是唯一可信来源且已纳入版本控制，出问题用 git 检出恢复即可。
 
-If you prefer to wire it manually, add to `$DSH_HOME/profiles/web/cordis.patch.yml`:
+如果你更愿意手工接线，在 `$DSH_HOME/profiles/web/cordis.patch.yml` 中加入：
 
 ```yaml
 - insert:
@@ -53,206 +33,106 @@ If you prefer to wire it manually, add to `$DSH_HOME/profiles/web/cordis.patch.y
         seriesSize: 600
 ```
 
-## Config
+## 配置项
 
-| key                 | default                                            | meaning                                              |
-| ------------------- | -------------------------------------------------- | ---------------------------------------------------- |
-| `apiPath`           | `/token-dashboard/api`                             | JSON route (browser fetches this)              |
-| `seriesSize`        | `600`                                              | max trend samples kept per session (across both live events and backfilled history) |
-| `scanRoot`          | `$DSH_HOME/sessions`                               | override the durable session root to scan for history |
-| `backfillOnStart`   | `true`                                             | run the historical replay once when the plugin loads |
-| `deepseekApiKey`    | `env DEEPSEEK_API_KEY`                             | DeepSeek official API key for the DeepSeek tab (recommended via env; the key never leaves the server) |
-| `balanceRefreshMs`  | `1800000` (30 min)                                 | how often to re-fetch the official balance        |
-| `balanceFile`       | `$DSH_HOME/dsh-token-dashboard-balance.json`       | where the balance history is persisted (survives restarts) |
-| `refreshMs` (client)| `2500`                                             | browser poll interval in ms                       |
+| 配置键 | 默认值 | 含义 |
+| ------ | ------ | ---- |
+| `apiPath` | `/token-dashboard/api` | JSON 路由（浏览器端向此地址请求数据） |
+| `seriesSize` | `600` | 每个会话保留的趋势样本上限（实时事件与回填历史共用此上限） |
+| `scanRoot` | `$DSH_HOME/sessions` | 覆盖扫描历史记录的持久化会话根目录 |
+| `backfillOnStart` | `true` | 插件加载时执行一次历史回填 |
+| `deepseekApiKey` | `env DEEPSEEK_API_KEY` | DeepSeek tab 所需的官方 API 密钥（建议通过环境变量提供；密钥绝不离开服务端） |
+| `balanceRefreshMs` | `1800000`（30 分钟） | 官方余额的重新拉取间隔 |
+| `balanceFile` | `$DSH_HOME/dsh-token-dashboard-balance.json` | 余额历史的持久化位置（重启后仍保留） |
+| `refreshMs`（客户端） | `2500` | 浏览器轮询间隔（毫秒） |
 
-## Backfill — how historical data is reconstructed
+## 回填 —— 历史数据是如何重建的
 
-When the plugin loads, `setImmediate` schedules a single-pass scan of every
-`<scanRoot>/<encoded-cwd>/session-*/session.jsonl.zstd`:
+插件加载时，`setImmediate` 会调度一次对所有 `<scanRoot>/<编码后的cwd>/session-*/session.jsonl.zstd` 的单遍扫描：
 
-1. The file's zstd frames are located by reading headers + block lengths (no
-   decoding), so the scan is fast even on hundreds of sessions.
-2. Each complete frame is decompressed (`node:zlib` — Node 22 ships Zstandard)
-   and its events fed through the same `foldEvent` the live subscription uses.
-   This re-derives both the cumulative totals and the per-step series.
-3. State already in memory is skipped on subsequent backfill ticks — the
-   periodic refresh (every 5 min) only re-folds sessions whose `.jsonl.zstd`
-   mtime advanced since we last read them. That way in-flight live samples
-   can't be clobbered while dsh is running.
-4. The very first payload the browser receives has `backfilled: false` and
-   `backfillError: null`; within ~1 second the next poll flips
-   `backfilled: true` and the widget shows a small "已回填" badge in the footer.
+1. 通过读取帧头与块长度来定位文件中的 zstd 帧（**不做解压**），因此即使有上百个会话，扫描依然很快。
+2. 每个完整帧被解压（`node:zlib` —— Node 22 已内置 Zstandard），其事件送入与实时订阅**完全相同**的 `foldEvent` 处理。这样累计值与分步序列都能被重新推导出来。
+3. 后续的回填轮次会跳过已在内存中的状态 —— 周期性刷新（每 5 分钟）只会重新折叠那些 `.jsonl.zstd` mtime 有推进的会话。这样 dsh 运行期间进行中的实时样本不会被覆盖破坏。
+4. 浏览器收到的第一份数据里 `backfilled: false`、`backfillError: null`；约 1 秒内的下一次轮询就会翻转为 `backfilled: true`，小窗页脚随即显示一个「已回填」标记。
 
-A typical replay of a 150 KB session log takes ~15 ms; a 2 MB log takes
-~50–250 ms. All sessions under `$DSH_HOME/sessions` are scanned, so boot
-overhead is bounded by the number of historical sessions, not the wall clock.
+重放一个 150 KB 的会话日志通常耗时约 15 ms；2 MB 的日志约 50–250 ms。`$DSH_HOME/sessions` 下所有会话都会被扫描，因此启动开销取决于历史会话的数量，而非挂钟时间。
 
-### What is reconstructed vs. approximated
+### 哪些是精确重建，哪些是近似值
 
-| field            | backfill source                      | accuracy                     |
-| ---------------- | ------------------------------------ | ---------------------------- |
-| `totals`         | every `assistant/message` usage      | exact                        |
-| `series[]`       | per (turn, step) flushes             | exact (same algorithm as live) |
-| `stats.turns`    | count of `turn/end`                  | exact                        |
-| `stats.steps`    | count of `step/end`                  | exact                        |
-| `context.contextWindow` | `request/context.contextWindow` | exact                        |
-| `context.pressureTokens` | last `assistant/message` usage | exact (latest sample only) |
-| `context.projectedTokens` | set to `pressureTokens` (no surface fold) | approximated |
+| 字段 | 回填来源 | 精确度 |
+| ---- | -------- | ------ |
+| `totals` | 每一条 `assistant/message` 的 usage | 精确 |
+| `series[]` | 按 (turn, step) 触发的 flush | 精确（与实时算法一致） |
+| `stats.turns` | `turn/end` 计数 | 精确 |
+| `stats.steps` | `step/end` 计数 | 精确 |
+| `context.contextWindow` | `request/context.contextWindow` | 精确 |
+| `context.pressureTokens` | 最后一条 `assistant/message` 的 usage | 精确（仅最新样本） |
+| `context.projectedTokens` | 直接取 `pressureTokens`（无 surface 折叠） | **近似** |
 
-The approximation on `projectedTokens` is documented because the host
-projection sets `projectedTokens = pressureTokens + surfaceTokens -
-sampledSurfaceTokens`, and backfill has no surface fold to replay. Since
-the live subscription will update this field as soon as the next
-`assistant/message` arrives, the approximation is only visible on the very
-first poll after plugin boot.
+之所以要说明 `projectedTokens` 是近似值：宿主的投影计算为 `projectedTokens = pressureTokens + surfaceTokens - sampledSurfaceTokens`，而回填过程没有可重放的 surface 折叠数据。由于下一条 `assistant/message` 到达时实时订阅就会更新该字段，这个近似只在插件启动后的第一次轮询中可见。
 
-## Views: 总消耗 tab vs 会话 tab vs 模型 tab vs DeepSeek tab
+## 四个视图：总消耗 / 会话 / 模型 / DeepSeek
 
-The widget has four tabbed views (key `T` cycles 总消耗 → 会话 → 模型 → DeepSeek,
-`0` jumps to 总消耗):
+小窗有四个 tab 视图（按键 `T` 循环切换 总消耗 → 会话 → 模型 → DeepSeek，按键 `0` 直接跳到 总消耗）：
 
-- **总消耗 (aggregate)** — one grid + charts for **all sessions combined** within
-  the selected time window:
-  - 输入 / 输出 / 缓存读取 / 缓存写入 are cumulative token counts, so they are
-    summed directly.
-  - **总命中率** is *not* an average of per-session hit rates; it is recomputed
-    from the sums: `总缓存读取 ÷ (总输入 + 总缓存读取 + 总缓存写入)`.
-  - **上下文占用** is an instantaneous per-session metric (current context
-    window fill) and has no meaningful total — the cell shows `—`.
-  - Both charge show hourly trends: 每小时输出 and 每小时总消耗 (uncached input +
-    output only — the actual API burn; cache read/write are discounted so they
-    are excluded).
-- **会话 (session)** — one grid + charts for a single session: follow mode
-  (`⚡ 跟随进行中的会话`, key `F`) auto-switches to the session that most
-  recently produced events (`payload.activeId`, i.e. the one you are actively
-  chatting with in DSH), or a specific session picked from the dropdown. This
-  view shows the session's own hit rate, context occupancy, and the same two
-  hourly charts.
-- **模型 (model)** — one card per provider/model pair showing **which model
-  consumed how many tokens**: 输入 (uncached) / 缓存读取 / 输出, a 总消耗
-  (uncached input + output) cell with the model's cache-hit rate, and a share
-  bar of the window's total burn. Cards are sorted by 总消耗 descending. The
-  provider/model pair is read from each `assistant/message`'s
-  `data.message.source` (falling back to 未知|未知 when absent), so mixed-model
-  conversations attribute every token to the model that actually generated it.
-  For routing providers that report a served model (Auto/routing providers such
-  as 火山方舟 ark), the model shown is the **server-routed model** from
-  `source.replayState.response.responseModel` (e.g. `kimi-k3`) rather than the
-  requested config name — the fallback is `source.model` when no routed name
-  was reported.
-  This tab shows **exact token counts only** — no money estimates. Model prices
-  change over time and (for opencode-go and the others) cannot be queried via an
-  API, so any "cost" derived from a stale price snapshot would just be misleading
-  guesswork. Real money figures belong in the providers' own consoles (or in the
-  DeepSeek tab below, which reflects the *official* balance).
-- **DeepSeek (官方余额)** — shows the official DeepSeek account balance fetched
-  from `GET https://api.deepseek.com/user/balance` ([docs](https://api-docs.deepseek.com/api/get-user-balance/)):
-  总余额 / 赠送余额 / 充值余额 per currency, plus account availability, a
-  **balance-over-time curve**, and the **balance drop** over 近1小时 / 近24小时 /
-  近7天 / 自监控以来. The server polls the endpoint once at startup and then every
-  `balanceRefreshMs` (default 30 min), appending each successful value to a
-  rolling history **persisted to disk** (`balanceFile`, default
-  `$DSH_HOME/dsh-token-dashboard-balance.json`) and reloaded on boot — so the
-  windows and curve keep their history across restarts instead of resetting.
-  The drop = latest balance − oldest balance inside that
-  window — the only real money signal available (token logs carry amounts, but
-  prices vary freely, so amounts are more honest than multiplying by a guessed
-  price). A negative drop means the balance *rose* mid-window (a recharge/grant
-  landed). The drop is an approximation of what this key consumed and can include
-  spend outside DSH — always cross-check the official billing console. A key is
-  required: set `deepseekApiKey` in the plugin config or the `DEEPSEEK_API_KEY`
-  environment variable. **The key stays on the server — it is never included in
-  the JSON payload.** Without a key the tab shows a setup hint; on HTTP/network
-  errors it shows the failure and retries automatically.
+- **总消耗（汇总）** —— 在所选时间窗口内，把**所有会话合并**为一组数值卡片与图表：
+  - 输入 / 输出 / 缓存读取 / 缓存写入 都是累计型 token 计数，直接求和。
+  - **总命中率**并非各会话命中率的平均值，而是由总和重新计算：`总缓存读取 ÷ (总输入 + 总缓存读取 + 总缓存写入)`。
+  - **上下文占用**是单会话的瞬时指标（当前上下文窗口填充度），没有有意义的总量 —— 该格显示 `—`。
+  - **API 调用次数**是窗口内所有会话的模型调用总次数（每条模型回复计 1 次）。
+  - 第一个图表的数据源**可点击切换**：输出 / 输入 / 缓存读取 / 总消耗 / 调用次数；第二个图表固定为每小时总消耗（仅 uncached 输入 + 输出 —— 即真实的 API 消耗；缓存读写有折扣，故排除在外）。
+- **会话** —— 针对单个会话的数值卡片与图表：跟随模式（`⚡ 跟随进行中的会话`，按键 `F`）会自动切换到最近产生事件的那个会话（即 `payload.activeId`，也就是你正在 DSH 中对话的那一个），也可以从下拉框中指定某个会话。此视图显示该会话自己的命中率、上下文占用、API 调用次数，以及同样的两个图表（第一个同样可切换数据源）。
+- **模型** —— 每个「提供商/模型」组合一张卡片，显示**哪个模型消耗了多少 token**：输入（uncached）/ 缓存读取 / 输出、该模型的 API 调用次数，以及一个带缓存命中率的总消耗格（uncached 输入 + 输出）和一条占窗口总消耗比例的条形图。卡片按总消耗降序排列。提供商/模型组合读取自每条 `assistant/message` 的 `data.message.source`（缺失时归入 未知|未知），因此混用多模型的对话能把每个 token 都归因到真正生成它的模型。
+  对于会上报实际服务模型的路由型提供商（Auto / 路由类提供商，例如火山方舟 ark），显示的是来自 `source.replayState.response.responseModel` 的**服务端实际路由模型**（例如 `kimi-k3`），而非请求时配置的名称 —— 当没有上报路由模型名时，回退为 `source.model`。
+  此 tab **只显示精确的 token 计数**，不做金额估算。模型价格会随时间变化，而且（对 opencode-go 等）无法通过 API 查询，因此基于过期价格快照推算出的任何「成本」都只是误导性的猜测。真实金额请查看各提供商自己的控制台（或下面的 DeepSeek tab，它反映的是**官方**余额）。
+- **DeepSeek（官方余额）** —— 显示从 `GET https://api.deepseek.com/user/balance` 拉取的 DeepSeek 官方账户余额（[文档](https://api-docs.deepseek.com/api/get-user-balance/)）：按币种显示 总余额 / 赠送余额 / 充值余额，加上账户可用状态、一条**余额随时间变化曲线**，以及 近1小时 / 近24小时 / 近7天 / 自监控以来 四个窗口的**余额下降量**。服务端在启动时拉取一次，之后每 `balanceRefreshMs`（默认 30 分钟）拉取一次，并把每个成功取到的值追加到一份**持久化到磁盘**的滚动历史中（`balanceFile`，默认 `$DSH_HOME/dsh-token-dashboard-balance.json`），启动时重新载入 —— 因此这些窗口与曲线能跨重启保留历史，而不会归零。
+  下降量 = 窗口内的最新余额 − 最旧余额 —— 这是唯一可得的真实金额信号（token 日志里有用量，但价格可自由浮动，所以用量比乘上一个猜测价格更诚实）。下降量为负说明窗口内余额**上升**了（有充值或赠送到账）。该下降量只是此密钥消耗的近似值，可能包含 DSH 之外的花费 —— 请务必与官方账单控制台交叉核对。使用此功能必须提供密钥：在插件配置中设置 `deepseekApiKey`，或设置 `DEEPSEEK_API_KEY` 环境变量。**密钥只留在服务端 —— 绝不会出现在 JSON 响应中。** 未配置密钥时该 tab 显示配置提示；遇到 HTTP/网络错误时显示失败原因并自动重试。
 
-A segmented control above the panes narrows the time window for **all** tabs:
+面板上方的分段控件用于收窄**所有** tab 的时间窗口：
 
-| label | `?range=` | window | granularity |
-| ----- | --------- | ------ | ----------- |
-| 全部 | `all`     | everything on disk | hourly |
-| 1月   | `30d`     | trailing 30 days   | hourly |
-| 1周   | `7d`      | trailing 7 days    | hourly |
-| 1天   | `1d`      | trailing 24 hours  | hourly |
-| 1小时 | `1h`      | trailing 1 hour    | **per-minute** |
+| 标签 | `?range=` | 窗口范围 | 粒度 |
+| ---- | --------- | -------- | ---- |
+| 全部 | `all` | 磁盘上的全部历史 | 每小时 |
+| 1月 | `30d` | 最近 30 天 | 每小时 |
+| 1周 | `7d` | 最近 7 天 | 每小时 |
+| 1天 | `1d` | 最近 24 小时 | 每小时 |
+| 1小时 | `1h` | 最近 1 小时 | **每分钟** |
 
-The **1小时** range is special: it renders the trend charts at **per-minute**
-granularity (a continuous 60-minute axis, zero-filled), so you can watch the
-last chunk of activity minute by minute. The widget polls every ~2.5 s, so a
-new minute point appears on the chart roughly once a minute while the panel is
-open. Per-minute buckets are kept as a rolling ~25h in-memory buffer; every
-other range keeps using the hourly buckets.
+**1小时**范围是特殊的：它以**每分钟**粒度渲染趋势图（连续的 60 分钟轴，空缺补零），便于逐分钟观察最近一段活动。小窗约每 2.5 秒轮询一次，因此面板打开时大约每分钟会出现一个新的分钟数据点。分钟级桶以约 25 小时的滚动缓冲保存在内存中；其他所有范围仍使用小时级桶。
 
-Switching the range re-fetches from the server (`GET /token-dashboard/api?range=…`)
-and re-aggregates every session's buckets, so totals, charts, and the
-collapsed-summary chips all reflect the selected window. The session picker
-lives inside the 会话 tab and offers follow-mode plus one entry per contributing
-session (label = derived title / cwd / id).
+切换范围会重新向服务端请求（`GET /token-dashboard/api?range=…`）并重新聚合每个会话的桶，因此汇总数值、图表以及折叠状态下的摘要标签都会反映所选窗口。会话选择器位于 会话 tab 内，提供跟随模式以及每个有数据贡献的会话条目（标签 = 推导标题 / cwd / id）。
 
-The selected range/view are remembered in `localStorage`
-(`dsh-token-dashboard:range`, `…:tab`, `…:follow`, `…:session`).
+所选范围、视图与图表数据源都记录在 `localStorage` 中（`dsh-token-dashboard:range`、`…:tab`、`…:follow`、`…:session`、`…:ametric`、`…:smetric`）。
 
-The widget is ~440px wide (3-column totals grid). The connection/backfill status
-badge (`连接中…` / `回填中…` / `已回填` / red `连接失败`) sits in the panel header
-next to the title, so it is visible even when the panel is collapsed; the footer
-keeps just the last-update time.
+小窗宽约 440px（3 列数值网格）。连接/回填状态标记（`连接中…` / `回填中…` / `已回填` / 红色 `连接失败`）位于面板头部标题旁，因此即使面板折叠也能看到；页脚只保留最后更新时间。
 
 ## API
 
 - `GET /token-dashboard/api[?range=all|1h|1d|7d|30d]` → `{ ok, now, range, activeId, config, count, backfilled, backfillError, totals, series, models[], balance, sessions[] }`
-  - `activeId` — id of the most recently active session (latest event across
-    ALL sessions, not just the window) — the browser's follow-mode target
-  - `totals` — combined `{ uncached, cacheRead, cacheWrite, output }` across all
-    sessions within the window
-  - `series[]` — combined per-hour `{ t, in, cr, cw, out, hitPct }` within the
-    window; when `range=1h` this is the per-minute series (60–61 points, 1-min
-    step) computed from the rolling minute buckets
-  - `models[]` — per-model `{ provider, model, totals, hitPct, sharePct }`
-    within the window:
-    - `totals` — `{ uncached, cacheRead, cacheWrite, output }` summed across
-      every session for that provider/model pair
-    - `hitPct` — the model's own cache-hit rate, percentage 0-100, recomputed
-      from its sums (`cacheRead ÷ (uncached + cacheRead + cacheWrite)`)
-    - `sharePct` — share of the window's total burn (uncached input + output),
-      percentage 0-100; entries sorted by burn descending
-    - (no `price`/`cost` fields — monetary estimates were removed)
-  - `balance` — official DeepSeek balance
-    `{ configured, ok, error, fetchedAt, is_available, infos: [{ currency, total, granted, topped }], history: [{ t, total, granted, topped }], consumed: { h1, d1, d7, all } }`;
-    `configured: false` until a key is set, `ok: false` while a fetch fails/never
-    ran; `history` is the chronological balance samples (newest last) that drive
-    the curve and the `consumed` balance-drop windows (¥, negative if it rose).
-    The API key itself is never present in the payload.
-  - `sessions[].totals` — in-window `{ uncached, cacheRead, cacheWrite, output }`
-  - `sessions[].title` — derived label: the first **real user message** text
-    (plugin-injected context is ignored), truncated to 60 chars; `null` if the
-    session has none. DSH stores no user-facing title, so the picker falls back
-    to the cwd basename, then to a sequential number, always suffixed with the
-    short id + optional preset tag (e.g. `修复插件样式 ·a1b2c3 [standard]`).
-  - `sessions[].preset` — agent preset id from the session header, if any
-  - `sessions[].createdAt` — session creation time from the header, ms epoch
-  - `sessions[].series[]` — in-window per-hour `{ t, in, cr, cw, out }`
-  - `sessions[].stats` — `{ turns, steps }` (host-side `sessionStats` has more fields on
-    the live wire, but backfill only recovers counts)
-  - `sessions[].context` — `{ contextWindow, pressureTokens, projectedTokens }`
+  - `activeId` —— 最近活跃会话的 id（取**所有**会话中最新的事件，不限于当前窗口）—— 即浏览器端跟随模式的目标
+  - `totals` —— 窗口内所有会话合并的 `{ uncached, cacheRead, cacheWrite, output, calls }`
+  - `series[]` —— 窗口内合并的每小时 `{ t, in, cr, cw, out, calls, hitPct }`；当 `range=1h` 时这是由滚动分钟桶算出的每分钟序列（60–61 个点，步长 1 分钟）
+  - `models[]` —— 窗口内的每模型数据 `{ provider, model, totals, hitPct, sharePct }`：
+    - `totals` —— 该「提供商/模型」组合在所有会话上求和得到的 `{ uncached, cacheRead, cacheWrite, output, calls }`
+    - `hitPct` —— 该模型自己的缓存命中率，百分比 0-100，由其总和重新计算（`cacheRead ÷ (uncached + cacheRead + cacheWrite)`）
+    - `sharePct` —— 占窗口总消耗（uncached 输入 + 输出）的比例，百分比 0-100；条目按消耗降序排列
+    - （没有 `price`/`cost` 字段 —— 金额估算已被移除）
+  - `balance` —— DeepSeek 官方余额
+    `{ configured, ok, error, fetchedAt, is_available, infos: [{ currency, total, granted, topped }], history: [{ t, total, granted, topped }], consumed: { h1, d1, d7, all } }`；
+    未设置密钥前 `configured: false`，拉取失败或从未执行时 `ok: false`；`history` 是按时间排序的余额样本（最新在最后），用于驱动曲线与 `consumed` 余额下降窗口（单位 ¥，上升则为负）。API 密钥本身绝不出现在响应中。
+  - `sessions[].totals` —— 窗口内的 `{ uncached, cacheRead, cacheWrite, output, calls }`
+  - `sessions[].title` —— 推导出的标签：第一条**真实用户消息**的文本（插件注入的上下文会被忽略），截断至 60 字符；该会话没有则为 `null`。DSH 不存储面向用户的标题，因此选择器会退化为使用 cwd 的基名，再退化为顺序编号，并总是追加短 id 与可选的预设标签（例如 `修复插件样式 ·a1b2c3 [standard]`）。
+  - `sessions[].preset` —— 会话头中的 agent 预设 id（若有）
+  - `sessions[].createdAt` —— 会话头中的创建时间，毫秒时间戳
+  - `sessions[].series[]` —— 窗口内的每小时 `{ t, in, cr, cw, out, calls }`
+  - `sessions[].stats` —— `{ turns, steps }`（宿主侧的 `sessionStats` 在实时链路上字段更多，但回填只能恢复计数）
+  - `sessions[].context` —— `{ contextWindow, pressureTokens, projectedTokens }`
 
-The widget's header has a **刷新** button (keyboard `R`) that fetches the
-current range immediately instead of waiting for the next poll; the icon spins
-briefly as feedback. There is deliberately **no "clear/reset"** — the
-plugin aggregates real session logs on disk, so wiping in-memory state would
-just be re-populated by the next backfill tick, which would only make the
-numbers vanish for a moment.
+小窗头部有一个**刷新**按钮（键盘 `R`），会立即按当前范围请求数据而不等下一次轮询；图标会短暂旋转作为反馈。这里刻意**没有「清空/重置」**功能 —— 插件聚合的是磁盘上真实的会话日志，清空内存状态只会在下一次回填时被重新填满，结果只是让数字消失一瞬间。
 
-## Notes & limitations
+## 说明与已知限制
 
-- The payload trend series is **per-hour** (each point aggregates one hour of
-  step samples), which keeps a 30-day window readable and lets the API slice any
-  time range cheaply. Live per-step granularity is still folded internally for
-  deduplication; the hour buckets are what the widget renders and the API serves.
-- Backfill does not replay the full surface projection. The `projectedTokens`
-  field therefore equals `pressureTokens` until live events catch up.
-- The very last (torn) zstd frame of a still-open session is skipped — the
-  session-writer will retry it on the next append. If dsh restarts in the
-  middle of a long conversation, the last few seconds of that conversation's
-  live samples will be picked up via the `session/event` subscription on top
-  of the backfilled baseline.
-- The widget is same-origin only (no CORS), safe over the LAN proxy.
+- 响应中的趋势序列是**按小时**的（每个点聚合一小时的分步样本），这样 30 天窗口仍然可读，也让 API 能低成本地切出任意时间范围。实时的分步粒度仍在内部折叠用于去重；小时桶才是小窗渲染与 API 提供的内容。
+- 回填不会重放完整的 surface 投影。因此在实时事件补上之前，`projectedTokens` 字段等于 `pressureTokens`。
+- 仍在写入的会话中，最后一个（被截断的）zstd 帧会被跳过 —— 会话写入器会在下次追加时重试。如果 dsh 在长对话中途重启，该对话最后几秒的实时样本会通过 `session/event` 订阅叠加到已回填的基线之上。
+- 小窗仅限同源使用（无 CORS），经局域网代理访问是安全的。

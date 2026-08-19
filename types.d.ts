@@ -1,56 +1,58 @@
-/** Server half configuration (all keys optional). */
+/** 服务端配置（所有键均为可选）。 */
 export interface Config {
-  /** Route serving the JSON payload (default "/token-dashboard/api"). */
+  /** 提供 JSON 数据的路由（默认 "/token-dashboard/api"）。 */
   apiPath?: string;
-  /** Max live per-step trend samples kept per session (default 600). */
+  /** 每个会话保留的实时分步趋势样本上限（默认 600）。 */
   seriesSize?: number;
-  /** Override the durable session root scanned for history (default $DSH_HOME/sessions). */
+  /** 覆盖扫描历史记录的持久化会话根目录（默认 $DSH_HOME/sessions）。 */
   scanRoot?: string;
-  /** Run the historical replay when the plugin loads (default true). */
+  /** 插件加载时执行历史回填（默认 true）。 */
   backfillOnStart?: boolean;
-  /** DeepSeek official API key for the balance tab (also read from env
-   *  `DEEPSEEK_API_KEY`). The key stays server-side and never reaches the page. */
+  /** 余额 tab 所需的 DeepSeek 官方 API 密钥（也可从环境变量
+   *  `DEEPSEEK_API_KEY` 读取）。密钥只留在服务端，绝不会传到页面。 */
   deepseekApiKey?: string;
-  /** How often to refresh the official balance (ms, default 30 min). */
+  /** 官方余额的刷新间隔（毫秒，默认 30 分钟）。 */
   balanceRefreshMs?: number;
-  /** Override where the balance history is persisted (default
-   *  `$DSH_HOME/dsh-token-dashboard-balance.json`). */
+  /** 覆盖余额历史的持久化位置（默认
+   *  `$DSH_HOME/dsh-token-dashboard-balance.json`）。 */
   balanceFile?: string;
 }
 
 /**
- * Aggregate token buckets within a time window (per session or across all).
- * Mirrors the tokenUsage projection fields per `assistant/message`.
+ * 某个时间窗口内的 token 汇总桶（可以是单会话的，也可以是全部会话合计）。
+ * 字段与每条 `assistant/message` 的 tokenUsage 投影保持一致。
  */
 export interface TokenDashboardTotals {
   uncached: number;
   cacheRead: number;
   cacheWrite: number;
   output: number;
+  /** 窗口内的 API 调用次数（每条模型回复计 1 次）。 */
+  calls: number;
 }
 
-/** One per-hour usage sample (deltas aggregated over one hour of steps). */
+/** 一个按小时的用量样本（把一小时内各步的增量聚合在一起）。 */
 export interface TokenDashboardHourSample {
   t: number;
   in: number;
   cr: number;
   cw: number;
   out: number;
-  /** Number of API calls in this hour. */
+  /** 该小时内的 API 调用次数。 */
   calls: number;
-  /** cache-read share of that hour's billed input, 0..1 (global series only). */
+  /** 该小时计费输入中缓存读取的占比，0..1（仅全局序列有此字段）。 */
   hitPct?: number;
 }
 
-/** Per-session dashboard state served to the browser widget (within the range). */
+/** 提供给浏览器小窗的单会话面板状态（限定在所选时间范围内）。 */
 export interface TokenDashboardSession {
   id: string;
   totals: TokenDashboardTotals;
-  /** Derived label: first real user message text, truncated; null when absent. */
+  /** 推导出的标签：第一条真实用户消息的文本，会被截断；没有则为 null。 */
   title: string | null;
-  /** Agent preset id from the session header (`standard`/`code`/…), if any. */
+  /** 会话头中的 agent 预设 id（`standard`/`code`/…），若有。 */
   preset: string | null;
-  /** Session creation time from the header, ms epoch; null when unknown. */
+  /** 会话头中的创建时间，毫秒时间戳；未知时为 null。 */
   createdAt: number | null;
   stats: { turns: number; steps: number } | null;
   context: { pressureTokens?: number; projectedTokens?: number; contextWindow?: number } | null;
@@ -58,20 +60,20 @@ export interface TokenDashboardSession {
   updatedAt: number | null;
 }
 
-/** One model's consumption within a time window (provider/model pair). Exact
- *  token counts only — monetary estimates were removed because prices change,
- *  cannot be queried, and stale prices would produce misleading amounts. */
+/** 某个时间窗口内单个模型（提供商/模型组合）的消耗。只提供精确的 token
+ *  计数 —— 金额估算已被移除，因为价格会变化、无法查询，用过期价格算出的
+ *  金额只会产生误导。 */
 export interface TokenDashboardModel {
   provider: string;
   model: string;
   totals: TokenDashboardTotals;
-  /** Cache-hit rate for this model, percentage 0-100; 0 when no billed input. */
+  /** 该模型的缓存命中率，百分比 0-100；无计费输入时为 0。 */
   hitPct: number;
-  /** Share of the window's total burn (uncached input + output), percentage 0-100. */
+  /** 占窗口总消耗（uncached 输入 + 输出）的比例，百分比 0-100。 */
   sharePct: number;
 }
 
-/** One currency entry of the official DeepSeek balance. */
+/** DeepSeek 官方余额中的一个币种条目。 */
 export interface TokenDashboardBalanceInfo {
   currency: string;
   total: number;
@@ -79,7 +81,7 @@ export interface TokenDashboardBalanceInfo {
   topped: number;
 }
 
-/** One balance sample recorded from a successful fetch (chronological). */
+/** 一次成功拉取所记录的余额样本（按时间顺序）。 */
 export interface TokenDashboardBalanceSample {
   t: number;
   total: number;
@@ -87,7 +89,7 @@ export interface TokenDashboardBalanceSample {
   topped: number;
 }
 
-/** Official DeepSeek account balance (from GET /user/balance; key never sent). */
+/** DeepSeek 官方账户余额（来自 GET /user/balance；密钥绝不外发）。 */
 export interface TokenDashboardBalance {
   configured: boolean;
   ok: boolean;
@@ -95,33 +97,33 @@ export interface TokenDashboardBalance {
   fetchedAt: number | null;
   is_available: boolean | null;
   infos: TokenDashboardBalanceInfo[];
-  /** Chronological recent samples (newest last). Persisted to disk on every
-   *  successful fetch and reloaded on boot, so windows survive restarts. */
+  /** 按时间顺序排列的近期样本（最新在最后）。每次成功拉取都会持久化到磁盘
+   *  并在启动时重新载入，因此各时间窗口能跨重启保留。 */
   history: TokenDashboardBalanceSample[];
-  /** Balance drop over 1h / 24h / 7d / all (recent minus oldest in window);
-   *  negative means the balance rose (recharge/grant mid-window). */
+  /** 近 1 小时 / 24 小时 / 7 天 / 全部窗口内的余额下降量（窗口内最新值减最旧值）；
+   *  为负说明余额上升了（窗口内有充值或赠送到账）。 */
   consumed: { h1: number | null; d1: number | null; d7: number | null; all: number | null };
 }
 
-/** Payload of GET <apiPath>[?range=all|1h|1d|7d|30d]. */
+/** GET <apiPath>[?range=all|1h|1d|7d|30d] 的响应体。 */
 export interface TokenDashboardPayload {
   ok: true;
   now: number;
-  /** Echoed query range; "all" when absent. */
+  /** 回显请求的时间范围；未指定时为 "all"。 */
   range: string;
-  /** Most recently active session id (latest event across ALL sessions); null when none. */
+  /** 最近活跃的会话 id（取所有会话中最新的事件）；没有则为 null。 */
   activeId: string | null;
   config: { apiPath: string; seriesSize: number };
   count: number;
   backfilled: boolean;
   backfillError: string | null;
-  /** Combined totals across every session within the window. */
+  /** 窗口内所有会话合并后的汇总值。 */
   totals: TokenDashboardTotals;
-  /** Combined per-hour trend within the window; per-minute (60-61 points) with range=1h. */
+  /** 窗口内合并的每小时趋势；range=1h 时为每分钟粒度（60-61 个点）。 */
   series: TokenDashboardHourSample[];
-  /** Per-model consumption within the window, sorted by burn desc. */
+  /** 窗口内的每模型消耗，按消耗降序排列。 */
   models: TokenDashboardModel[];
-  /** Official DeepSeek account balance + consumption-by-balance-drop. */
+  /** DeepSeek 官方账户余额，以及按余额下降推算的消耗。 */
   balance: TokenDashboardBalance;
   sessions: TokenDashboardSession[];
 }

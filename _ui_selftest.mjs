@@ -1,10 +1,9 @@
 #!/usr/bin/env node
 /**
- * _ui_selftest.mjs — headless checks on the client bundle that don't need a real
- * DOM: the browser half must (1) register under the expected id, (2) expose
- * {name, apply}, (3) require nothing from the module table, and (4) ship a
- * brace-balanced, well-formed CSS string. Full interactive rendering still needs
- * a real browser (load the GUI and open the widget).
+ * _ui_selftest.mjs —— 对浏览器端 bundle 的无头检查，不需要真实 DOM：浏览器半边
+ * 必须做到 (1) 以预期的 id 注册、(2) 导出 {name, apply}、(3) 不从模块表 require
+ * 任何东西、(4) 提供一份花括号配平、格式正确的 CSS 字符串。完整的交互式渲染仍需
+ * 真实浏览器验证（打开 GUI 并展开小窗）。
  */
 import { join, dirname } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
