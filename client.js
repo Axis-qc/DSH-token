@@ -771,7 +771,7 @@ window.__ModuleLoader__.load({
 					unit: def.unit,
 					min: 0,
 					legend: vals.length >= 2
-						? "峰值 " + (isCalls ? String(Math.max.apply(null, vals)) : fmt(Math.max.apply(null, vals))) + " · " + vals.length + slotUnit
+						? "峰值 " + (isCalls ? String(Math.max.apply(null, vals)) : fmt(Math.max.apply(null, vals))) + " · " + vals.length + slotUnit()
 						: "",
 					tooltip: function (i) {
 						var s = series[i];
@@ -898,8 +898,10 @@ window.__ModuleLoader__.load({
 
 			/** 感知时间范围的横轴标签：1h 范围用分钟，其余用小时。 */
 			var tf = function (ms) { return range === "1h" ? dtMin(ms) : dtHour(ms); };
-			/** 趋势点单位标签：1h 范围用「分」，否则用「时」。 */
-			var slotUnit = range === "1h" ? " 分" : " 时";
+			/** 趋势点单位标签：1h 范围用「分」，否则用「时」。随 range 动态计算，
+			 *  因为用户切换范围后 legend 需立即反映新的时间粒度（不能只在加载时
+			 *  求值一次，否则 1h → 30d 后单位会卡在「分」）。 */
+			var slotUnit = function () { return range === "1h" ? " 分" : " 时"; };
 
 			/** 渲染总消耗（聚合）面板：累计字段直接求和、
 			 *  加权总命中率，不含上下文占用率（这是瞬时性的
@@ -943,7 +945,7 @@ window.__ModuleLoader__.load({
 					color: "var(--tdb-accent-in)",
 					unit: "tok",
 					min: 0,
-					legend: totalVals.length >= 2 ? "峰值 " + fmt(Math.max.apply(null, totalVals)) + " · " + totalVals.length + slotUnit : "",
+					legend: totalVals.length >= 2 ? "峰值 " + fmt(Math.max.apply(null, totalVals)) + " · " + totalVals.length + slotUnit() : "",
 					tooltip: function (i) {
 						var s = series[i];
 						return "<b>" + fmt(s.in + s.out) + " tok</b>总消耗(输入+输出)" +
@@ -1000,7 +1002,7 @@ window.__ModuleLoader__.load({
 					color: "var(--tdb-accent-in)",
 					unit: "tok",
 					min: 0,
-					legend: totalVals.length >= 2 ? "峰值 " + fmt(Math.max.apply(null, totalVals)) + " · " + totalVals.length + slotUnit : "",
+					legend: totalVals.length >= 2 ? "峰值 " + fmt(Math.max.apply(null, totalVals)) + " · " + totalVals.length + slotUnit() : "",
 					tooltip: function (i) {
 						var s = series[i];
 						return "<b>" + fmt(s.in + s.out) + " tok</b>总消耗(输入+输出)" +
