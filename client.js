@@ -7,9 +7,9 @@
  * （无 React、无 slots、无主题套件）：单一经典 <script> 风格工厂，
  * 唯一的浏览器依赖是 `fetch`。
  *
- * 小窗可拖拽（pointer 事件），在 localStorage 中记住折叠状态与
- * 位置，标签页隐藏时暂停轮询，插件 fiber 被销毁时会将其完全移除
- * （HMR 刷新安全）。
+ * 小窗可拖拽、可沿四边/四角手动拉伸（pointer 事件），在 localStorage 中
+ * 记住折叠状态、位置与自定义尺寸，标签页隐藏时暂停轮询，插件 fiber 被
+ * 销毁时会将其完全移除（HMR 刷新安全）。
  */
 window.__ModuleLoader__.load({
 	id: "dsh-token-dashboard",
@@ -106,17 +106,69 @@ window.__ModuleLoader__.load({
 			"dsh-token-dashboard *{{ box-sizing: border-box; margin: 0; padding: 0; }}",
 			// ── 面板外壳 ──────────────────────────────────────────────────
 			"dsh-token-dashboard .tdb-panel{",
-			"  pointer-events: auto;",
-			"  min-width: 360px; max-width: 480px; width: 440px;",
+			"  pointer-events: auto; position: relative;",
+			"  display: flex; flex-direction: column;",
+			"  min-width: 300px; max-width: calc(100vw - 32px); width: 440px;",
 			"  border: 1px solid var(--tdb-border); border-radius: var(--tdb-radius-md);",
 			"  background: var(--tdb-bg); backdrop-filter: blur(20px) saturate(1.4); -webkit-backdrop-filter: blur(20px) saturate(1.4);",
 			"  box-shadow: var(--tdb-shadow); overflow: hidden;",
 			"  transition: border-color .15s ease, box-shadow .2s ease;",
 			"}",
 			"dsh-token-dashboard .tdb-panel:hover{ border-color: var(--tdb-border-strong); }",
+			// ── 迷你胶囊（折叠态） ────────────────────────────────────────
+			// 收起时整个面板隐藏，只留一个紧凑胶囊，展示当前时间窗口内
+			// 全部会话汇总的 6 项核心指标（总消耗/输入/输出/缓存读取/
+			// 命中率/API 调用次数），点击展开完整面板，可拖拽移动，
+			// 连接失败时显示红色「连接失败」。
+			"dsh-token-dashboard[aria-collapsed='true'] .tdb-panel{ display: none !important; }",
+			"dsh-token-dashboard .tdb-mini{",
+			"  pointer-events: auto; display: none; align-items: center; gap: 6px;",
+			"  height: 36px; padding: 0 10px; border-radius: 999px;",
+			"  border: 1px solid var(--tdb-border); background: var(--tdb-bg);",
+			"  backdrop-filter: blur(20px) saturate(1.4); -webkit-backdrop-filter: blur(20px) saturate(1.4);",
+			"  box-shadow: var(--tdb-shadow); cursor: grab; user-select: none;",
+			"  transition: border-color .15s ease, box-shadow .2s ease;",
+			"}",
+			"dsh-token-dashboard[aria-collapsed='true'] .tdb-mini{ display: inline-flex; }",
+			"dsh-token-dashboard .tdb-mini:hover{ border-color: var(--tdb-border-strong); }",
+			"dsh-token-dashboard .tdb-mini:active{ cursor: grabbing; }",
+			"dsh-token-dashboard .tdb-mini .tdb-mc{",
+			"  display: inline-flex; align-items: baseline; gap: 3px;",
+			"  padding: 2px 7px; border-radius: 7px; white-space: nowrap;",
+			"  background: var(--tdb-bg-cell); border: 1px solid var(--tdb-border);",
+			"}",
+			"dsh-token-dashboard .tdb-mini .tdb-mc b{",
+			"  font-family: var(--tdb-mono); font-size: 12px; font-weight: 600;",
+			"  font-variant-numeric: tabular-nums; color: var(--tdb-fg); line-height: 1.2;",
+			"}",
+			"dsh-token-dashboard .tdb-mini .tdb-mc .tdb-ml{ font-size: 9.5px; color: var(--tdb-fg-muted); }",
+			"dsh-token-dashboard .tdb-mini .tdb-mc-total b{ color: var(--tdb-accent-ctx); }",
+			"dsh-token-dashboard .tdb-mini .tdb-mc-in b{ color: var(--tdb-accent-in); }",
+			"dsh-token-dashboard .tdb-mini .tdb-mc-out b{ color: var(--tdb-accent-out); }",
+			"dsh-token-dashboard .tdb-mini .tdb-mc-cr b{ color: var(--tdb-accent-cr); }",
+			"dsh-token-dashboard .tdb-mini .tdb-mc-hit b{ color: var(--tdb-accent-hit); }",
+			"dsh-token-dashboard .tdb-mini .tdb-mc-calls b{ color: var(--tdb-accent-calls); }",
+			"dsh-token-dashboard .tdb-mini .tdb-m-err{",
+			"  display: none; font-size: 11px; font-weight: 600;",
+			"  color: var(--tdb-accent-err); padding: 0 4px; white-space: nowrap;",
+			"}",
+			"dsh-token-dashboard .tdb-mini.err .tdb-m-err{ display: inline; }",
+			"dsh-token-dashboard .tdb-mini.err .tdb-mc{ display: none; }",
+			// ── 边缘/角落拉伸手柄 ────────────────────────────────────────
+			// 四个边条 + 四个角块，悬停时以强调色淡显，方便发现。
+			"dsh-token-dashboard .tdb-rsz{ position: absolute; z-index: 3; touch-action: none; transition: background .12s ease; }",
+			"dsh-token-dashboard .tdb-rsz:hover, dsh-token-dashboard .tdb-rsz:active{ background: var(--tdb-accent-in); opacity: .25; }",
+			"dsh-token-dashboard .tdb-rsz-n{ top: 0; left: 10px; right: 10px; height: 6px; cursor: ns-resize; }",
+			"dsh-token-dashboard .tdb-rsz-s{ bottom: 0; left: 10px; right: 10px; height: 6px; cursor: ns-resize; }",
+			"dsh-token-dashboard .tdb-rsz-e{ right: 0; top: 10px; bottom: 10px; width: 6px; cursor: ew-resize; }",
+			"dsh-token-dashboard .tdb-rsz-w{ left: 0; top: 10px; bottom: 10px; width: 6px; cursor: ew-resize; }",
+			"dsh-token-dashboard .tdb-rsz-ne{ top: 0; right: 0; width: 14px; height: 14px; cursor: nesw-resize; }",
+			"dsh-token-dashboard .tdb-rsz-nw{ top: 0; left: 0; width: 14px; height: 14px; cursor: nwse-resize; }",
+			"dsh-token-dashboard .tdb-rsz-se{ bottom: 0; right: 0; width: 14px; height: 14px; cursor: nwse-resize; }",
+			"dsh-token-dashboard .tdb-rsz-sw{ bottom: 0; left: 0; width: 14px; height: 14px; cursor: nesw-resize; }",
 			// ── 头部 ────────────────────────────────────────────────────────
 			"dsh-token-dashboard .tdb-head{",
-			"  display: flex; align-items: center; gap: 10px;",
+			"  display: flex; align-items: center; gap: 10px; flex: none;",
 			"  padding: 10px 12px; cursor: grab; user-select: none;",
 			"  border-bottom: 1px solid var(--tdb-border); background: var(--tdb-bg-elev);",
 			"}",
@@ -179,6 +231,7 @@ window.__ModuleLoader__.load({
 			"dsh-token-dashboard .tdb-body{",
 			"  padding: var(--tdb-pad-y) var(--tdb-pad-x);",
 			"  display: flex; flex-direction: column; gap: var(--tdb-gap);",
+			"  flex: 1 1 auto; min-height: 0;",
 			"  max-height: min(60vh, 520px); overflow-y: auto;",
 			"  scrollbar-width: thin; scrollbar-color: var(--tdb-border-strong) transparent;",
 			"}",
@@ -512,7 +565,7 @@ window.__ModuleLoader__.load({
 			var root = document.createElement("dsh-token-dashboard");
 			root.innerHTML = [
 				"<div class=\"tdb-panel\">",
-				"  <div class=\"tdb-head\" title=\"拖动移动 · 单击空白处展开/收起\">",
+				"  <div class=\"tdb-head\" title=\"拖动移动 · 单击空白处展开/收起 · 边缘可拉伸\">",
 				"    <span class=\"tdb-dot\"></span>",
 				"    <span class=\"tdb-title\">Token 面板</span>",
 				"    <span class=\"tdb-status\"></span>",
@@ -611,11 +664,29 @@ window.__ModuleLoader__.load({
 				"      <span class=\"tdb-fupdated\">—</span>",
 				"    </div>",
 				"  </div>",
+				"  <i class=\"tdb-rsz tdb-rsz-n\" data-rsz=\"n\" title=\"拉伸上边缘\"></i>",
+				"  <i class=\"tdb-rsz tdb-rsz-s\" data-rsz=\"s\" title=\"拉伸下边缘\"></i>",
+				"  <i class=\"tdb-rsz tdb-rsz-e\" data-rsz=\"e\" title=\"拉伸右边缘\"></i>",
+				"  <i class=\"tdb-rsz tdb-rsz-w\" data-rsz=\"w\" title=\"拉伸左边缘\"></i>",
+				"  <i class=\"tdb-rsz tdb-rsz-ne\" data-rsz=\"ne\" title=\"拉伸右上角\"></i>",
+				"  <i class=\"tdb-rsz tdb-rsz-nw\" data-rsz=\"nw\" title=\"拉伸左上角\"></i>",
+				"  <i class=\"tdb-rsz tdb-rsz-se\" data-rsz=\"se\" title=\"拉伸右下角\"></i>",
+				"  <i class=\"tdb-rsz tdb-rsz-sw\" data-rsz=\"sw\" title=\"拉伸左下角\"></i>",
+				"</div>",
+				"<div class=\"tdb-mini\" title=\"点击展开\">",
+				"  <span class=\"tdb-m-err\">连接失败</span>",
+				"  <span class=\"tdb-mc tdb-mc-total\"><b class=\"tdb-mv-total\">—</b><span class=\"tdb-ml\">总</span></span>",
+				"  <span class=\"tdb-mc tdb-mc-in\"><b class=\"tdb-mv-in\">—</b><span class=\"tdb-ml\">入</span></span>",
+				"  <span class=\"tdb-mc tdb-mc-out\"><b class=\"tdb-mv-out\">—</b><span class=\"tdb-ml\">出</span></span>",
+				"  <span class=\"tdb-mc tdb-mc-cr\"><b class=\"tdb-mv-cr\">—</b><span class=\"tdb-ml\">缓</span></span>",
+				"  <span class=\"tdb-mc tdb-mc-hit\"><b class=\"tdb-mv-hit\">—</b><span class=\"tdb-ml\">命中</span></span>",
+				"  <span class=\"tdb-mc tdb-mc-calls\"><b class=\"tdb-mv-calls\">—</b><span class=\"tdb-ml\">调用</span></span>",
 				"</div>"
 			].join("");
 			document.body.appendChild(root);
 
 			var panel = root.querySelector(".tdb-panel");
+			var miniEl = root.querySelector(".tdb-mini");
 			var dot = root.querySelector(".tdb-dot");
 			var summary = root.querySelector(".tdb-summary");
 			var bodyEl = root.querySelector(".tdb-body");
@@ -728,6 +799,7 @@ window.__ModuleLoader__.load({
 				root.setAttribute("aria-collapsed", String(collapsed));
 				toggleBtn.setAttribute("aria-expanded", String(!collapsed));
 				if (!silent) writeStore("collapsed", collapsed ? "1" : "0");
+				applySize();
 			}
 
 			function toggle() {
@@ -1074,7 +1146,7 @@ window.__ModuleLoader__.load({
 					}
 					dsLeg.textContent = hist.length + " 样本 · 现 ¥" + (vals[vals.length - 1]).toFixed(2);
 				}
-				dsMeta.textContent = b && b.fetchedAt ? "上次获取 " + clock(b.fetchedAt) + " · 每 30 分钟采样 · 历史已持久化，重启保留" : "—";
+				dsMeta.textContent = b && b.fetchedAt ? "上次获取 " + clock(b.fetchedAt) + " · 整点/半点采样 · 历史已持久化，重启保留" : "—";
 			}
 
 			/** 根据 `data` 重新渲染所有内容。 */
@@ -1181,6 +1253,33 @@ window.__ModuleLoader__.load({
 					fUpdated.title = "";
 				}
 				updateSelect();
+
+				// 迷你胶囊（折叠态）：当前时间窗口内全部会话汇总的
+				// 6 项核心指标（总消耗/输入/输出/缓存读取/命中率/API 调用）。
+				miniEl.classList.toggle("err", !!error);
+				miniEl.title = error ? String(error) : "全部会话汇总 · 点击展开";
+				var mB = {};
+				[["total", ".tdb-mv-total"], ["in", ".tdb-mv-in"], ["out", ".tdb-mv-out"], ["cr", ".tdb-mv-cr"], ["hit", ".tdb-mv-hit"], ["calls", ".tdb-mv-calls"]].forEach(function (p) { mB[p[0]] = miniEl.querySelector(p[1]); });
+				var mTot = data && data.totals ? data.totals : null;
+				if (mTot) {
+					var mbilled = (mTot.uncached || 0) + (mTot.cacheRead || 0) + (mTot.cacheWrite || 0);
+					var mhit = mbilled > 0 ? ((mTot.cacheRead || 0) / mbilled) * 100 : null;
+					mB.total.textContent = fmt((mTot.uncached || 0) + (mTot.output || 0));
+					mB.total.parentElement.title = "总消耗(输入+输出)";
+					mB.in.textContent = fmt(mTot.uncached);
+					mB.in.parentElement.title = "输入 · uncached";
+					mB.out.textContent = fmt(mTot.output);
+					mB.out.parentElement.title = "输出";
+					mB.cr.textContent = fmt(mTot.cacheRead);
+					mB.cr.parentElement.title = "缓存读取";
+					mB.hit.textContent = mhit === null ? "—" : mhit.toFixed(0) + "%";
+					mB.hit.parentElement.title = mhit === null ? "总命中率" : "总命中率 " + mhit.toFixed(1) + "%";
+					var mCalls = typeof mTot.calls === "number" ? mTot.calls : null;
+					mB.calls.textContent = mCalls === null ? "—" : String(mCalls);
+					mB.calls.parentElement.title = mCalls === null ? "数据源未上报调用次数" : "API 调用次数(每次模型回复计 1 次)";
+				} else {
+					for (var mk in mB) mB[mk].textContent = "—";
+				}
 			}
 
 			/** 供选择器使用的人类可读会话标签：派生的标题（首条用户消息）→
@@ -1275,10 +1374,10 @@ window.__ModuleLoader__.load({
 				if (ev.target && ev.target.closest && ev.target.closest(".tdb-btns")) return;
 				var rect = root.getBoundingClientRect();
 				drag = { dx: ev.clientX - rect.left, dy: ev.clientY - rect.top, moved: false };
-				head.setPointerCapture(ev.pointerId);
-				head.addEventListener("pointermove", onPointerMove);
-				head.addEventListener("pointerup", onPointerUp);
-				head.addEventListener("pointercancel", onPointerUp);
+				ev.currentTarget.setPointerCapture(ev.pointerId);
+				ev.currentTarget.addEventListener("pointermove", onPointerMove);
+				ev.currentTarget.addEventListener("pointerup", onPointerUp);
+				ev.currentTarget.addEventListener("pointercancel", onPointerUp);
 				ev.preventDefault();
 			}
 			function onPointerMove(ev) {
@@ -1296,14 +1395,98 @@ window.__ModuleLoader__.load({
 				if (!drag) return;
 				if (!drag.moved) toggle();
 				drag = null;
-				head.removeEventListener("pointermove", onPointerMove);
-				head.removeEventListener("pointerup", onPointerUp);
-				head.removeEventListener("pointercancel", onPointerUp);
+				ev.currentTarget.removeEventListener("pointermove", onPointerMove);
+				ev.currentTarget.removeEventListener("pointerup", onPointerUp);
+				ev.currentTarget.removeEventListener("pointercancel", onPointerUp);
 				if (pos) writeStore("pos", JSON.stringify(pos));
 			}
 
 			head.addEventListener("pointerdown", onPointerDown);
+			miniEl.addEventListener("pointerdown", onPointerDown);
 			toggleBtn.addEventListener("click", toggle);
+
+			// ── 边缘/角落拉伸 ─────────────────────────────────────────────
+			// 四边与四角各有一个隐形手柄（.tdb-rsz）。拉伸在屏幕坐标中
+			// 计算新矩形：固定对侧边缘，让被抓住的边缘跟随光标，并把
+			// 结果同时写回面板尺寸与（若脱离默认角落停靠）显式位置。
+			// 尺寸与位置都持久化到 localStorage。
+			var sizeW = null, sizeH = null;
+			try {
+				var rawSize = readStore("size", "");
+				if (rawSize) {
+					var parsedSize = JSON.parse(rawSize);
+					if (typeof parsedSize.w === "number" && Number.isFinite(parsedSize.w)) sizeW = parsedSize.w;
+					if (typeof parsedSize.h === "number" && Number.isFinite(parsedSize.h)) sizeH = parsedSize.h;
+				}
+			} catch { /* 存储损坏——忽略 */ }
+
+			/** 应用自定义尺寸（null = 未设置 → 走 CSS 默认）。
+			 *  折叠时高度回到自动（只保留头部一行）。 */
+			function applySize() {
+				panel.style.width = sizeW ? Math.round(sizeW) + "px" : "";
+				panel.style.height = sizeH && !collapsed ? Math.round(sizeH) + "px" : "";
+				// 显式高度接管后放开主体的默认 max-height，让内容区填满面板。
+				bodyEl.style.maxHeight = sizeH ? "none" : "";
+			}
+
+			var rsz = null;
+			function onRszDown(ev) {
+				if (ev.button !== 0) return;
+				var handle = ev.currentTarget;
+				var rect = panel.getBoundingClientRect();
+				rsz = { dir: handle.getAttribute("data-rsz"), sx: ev.clientX, sy: ev.clientY, rect: rect, moved: false };
+				handle.setPointerCapture(ev.pointerId);
+				handle.addEventListener("pointermove", onRszMove);
+				handle.addEventListener("pointerup", onRszUp);
+				handle.addEventListener("pointercancel", onRszUp);
+				ev.preventDefault();
+				ev.stopPropagation();
+			}
+			function onRszMove(ev) {
+				if (!rsz) return;
+				var dx = ev.clientX - rsz.sx;
+				var dy = ev.clientY - rsz.sy;
+				var r = rsz.rect;
+				var dir = rsz.dir;
+				var vw = window.innerWidth || 1200, vh = window.innerHeight || 800;
+				var minW = 300, maxW = Math.max(minW, vw - 16);
+				var minH = 110, maxH = Math.max(minH, vh - 16);
+				var x = r.left, y = r.top, w = r.width, h = r.height;
+				if (dir.indexOf("e") !== -1) { w = Math.min(maxW, Math.max(minW, r.width + dx)); x = r.left; }
+				if (dir.indexOf("w") !== -1) { w = Math.min(maxW, Math.max(minW, r.width - dx)); x = r.right - w; }
+				if (!collapsed) {
+					// 折叠时高度由头部决定，忽略纵向拉伸。
+					if (dir.indexOf("s") !== -1) { h = Math.min(maxH, Math.max(minH, r.height + dy)); y = r.top; }
+					if (dir.indexOf("n") !== -1) { h = Math.min(maxH, Math.max(minH, r.height - dy)); y = r.bottom - h; }
+				}
+				// 保证面板整体留在视口内。
+				x = Math.max(4, Math.min(x, vw - w - 4));
+				y = Math.max(4, Math.min(y, vh - h - 4));
+				rsz.moved = true;
+				// 拉伸即脱离默认角落停靠，转为显式定位（与拖拽行为一致）。
+				pos = { x: x, y: y };
+				root.style.left = Math.round(x) + "px";
+				root.style.top = Math.round(y) + "px";
+				root.style.right = "";
+				root.style.bottom = "";
+				sizeW = w;
+				if (!collapsed) sizeH = h;
+				applySize();
+			}
+			function onRszUp(ev) {
+				if (!rsz) return;
+				var handle = ev.currentTarget;
+				rsz = null;
+				handle.removeEventListener("pointermove", onRszMove);
+				handle.removeEventListener("pointerup", onRszUp);
+				handle.removeEventListener("pointercancel", onRszUp);
+				writeStore("size", JSON.stringify({ w: sizeW, h: sizeH }));
+				if (pos) writeStore("pos", JSON.stringify(pos));
+			}
+			var rszHandles = root.querySelectorAll(".tdb-rsz");
+			for (var rz = 0; rz < rszHandles.length; rz++) {
+				rszHandles[rz].addEventListener("pointerdown", onRszDown);
+			}
 			refreshBtn.addEventListener("click", function (ev) { ev.stopPropagation(); doRefresh(); });
 			selEl.addEventListener("change", function () {
 				var v = selEl.value;
@@ -1430,6 +1613,10 @@ window.__ModuleLoader__.load({
 				yield function dispose() {
 					clearInterval(timer);
 					head.removeEventListener("pointerdown", onPointerDown);
+					miniEl.removeEventListener("pointerdown", onPointerDown);
+					for (var rzx = 0; rzx < rszHandles.length; rzx++) {
+						rszHandles[rzx].removeEventListener("pointerdown", onRszDown);
+					}
 					document.removeEventListener("visibilitychange", onVis);
 					document.removeEventListener("keydown", onKey);
 					if (root && root.parentNode) root.parentNode.removeChild(root);

@@ -730,7 +730,8 @@ function aggregateModels(sessions, start, endMs) {
 //       （config `deepseekApiKey` 或环境变量 `DEEPSEEK_API_KEY`）。
 //       官方文档：https://api-docs.deepseek.com/api/get-user-balance/
 const DEEPSEEK_BALANCE_URL = "https://api.deepseek.com/user/balance";
-const DEFAULT_BALANCE_REFRESH_MS = 30 * 60 * 1000;
+// 官方 DeepSeek 账户余额的拉取间隔固定为 30 分钟，对齐本地时间
+// 的整点与半点（:00 / :30）。
 
 /**
  * 把官方 `/user/balance` 响应规范化为便于展示的数字。
@@ -881,7 +882,6 @@ export function apply(ctx, config = {}) {
 	const deepseekApiKey =
 		(typeof config.deepseekApiKey === "string" && config.deepseekApiKey.trim() !== "" ? config.deepseekApiKey.trim() : "") ||
 		(typeof process !== "undefined" && process.env && typeof process.env.DEEPSEEK_API_KEY === "string" ? process.env.DEEPSEEK_API_KEY.trim() : "");
-	const balanceRefreshMs = clampInt(config.balanceRefreshMs, 30000, 6 * 24 * 3600000, DEFAULT_BALANCE_REFRESH_MS);
 	const balanceFile =
 		typeof config.balanceFile === "string" && config.balanceFile.trim() !== "" ? config.balanceFile.trim() : defaultBalanceFile();
 	let balance = {
@@ -1117,22 +1117,32 @@ export function apply(ctx, config = {}) {
 	const refreshTimer = setInterval(() => runBackfill(true), BACKFILL_REFRESH_MS);
 	if (typeof refreshTimer.unref === "function") refreshTimer.unref();
 
-	// DeepSeek 余额：启动后立即拉取，之后按配置的节奏拉取。
+	// DeepSeek 余额：启动后立即拉取一次，之后用 setTimeout 链对齐到
+	// 本地时间的整点与半点（:00 / :30）拉取，每半小时一次，
+	// 采样时刻始终整齐（不再从插件启动时刻起算）。
 	if (deepseekApiKey !== "") {
 		setImmediate(() => {
 			refreshBalance().catch(() => {});
+			scheduleBalanceTick();
 		});
 	}
-	const balanceTimer = setInterval(() => {
-		refreshBalance().catch(() => {});
-	}, balanceRefreshMs);
-	if (typeof balanceTimer.unref === "function") balanceTimer.unref();
+	let balanceTimer = null;
+	function scheduleBalanceTick() {
+		const now = new Date();
+		const targetMinute = now.getMinutes() < 30 ? 30 : 60;
+		const delay = targetMinute * 60000 - now.getMinutes() * 60000 - now.getSeconds() * 1000 - now.getMilliseconds();
+		balanceTimer = setTimeout(() => {
+			refreshBalance().catch(() => {});
+			scheduleBalanceTick();
+		}, delay);
+		if (typeof balanceTimer.unref === "function") balanceTimer.unref();
+	}
 
 	ctx.effect(
 		function* () {
 			yield () => {
 				clearInterval(refreshTimer);
-				clearInterval(balanceTimer);
+				clearTimeout(balanceTimer);
 			};
 		},
 		"dsh-token-dashboard: lifecycle"
