@@ -674,14 +674,15 @@ function aggregateWindow(sessions, rangeMs) {
  * 对窗口内的每个模型消耗做聚合：累加每个会话的按模型小时桶。
  * 模型身份由每条 assistant/message 携带的 provider/model 对构成
  * （未知对回退到 未知|未知）。占比基于模型的 总消耗 计算
- * （仅 uncached 输入 + 输出），这与图表使用的真实 API 消耗定义一致。
+ * （API 整体消耗：uncached 输入 + 缓存读取 + 缓存写入 + 输出），
+ * 这与图表使用的整体消耗定义一致。
  * 不提供货币估算：token 数来自会话日志是精确的，金额则不是
  * （参见 DeepSeek 余额 tab）。
  * @param {Map<string, ReturnType<typeof newSessionState>>} sessions
  * @param {number} start - 窗口起点（ms 时间戳）。
  * @param {number} endMs - 窗口终点（ms 时间戳，通常为当前时刻）。
  * @returns {Array<{ provider: string, model: string, totals: { uncached: number, cacheRead: number, cacheWrite: number, output: number }, hitPct: number, sharePct: number }>}
- *   按 总消耗（uncached + output）降序排列。
+ *   按 总消耗（整体，含缓存）降序排列。
  */
 function aggregateModels(sessions, start, endMs) {
 	const picked = new Map();
@@ -712,19 +713,25 @@ function aggregateModels(sessions, start, endMs) {
 		}
 	}
 	const list = [...picked.values()].filter((r) => r.uncached + r.cacheRead + r.cacheWrite + r.output + r.calls > 0);
-	const grand = list.reduce((a, r) => a + r.uncached + r.output, 0);
+	// 兼容两种形状：聚合前的原始记录（字段平铺）与映射后的条目（字段在 .totals）。
+	const overallOf = (r) => {
+		const t = r.totals || r;
+		return t.uncached + t.cacheRead + t.cacheWrite + t.output;
+	};
+	const grand = list.reduce((a, r) => a + overallOf(r), 0);
 	return list
 		.map((r) => {
 			const billed = r.uncached + r.cacheRead + r.cacheWrite;
+			const ov = overallOf(r);
 			return {
 				provider: r.provider,
 				model: r.model,
 				totals: { uncached: r.uncached, cacheRead: r.cacheRead, cacheWrite: r.cacheWrite, output: r.output, calls: r.calls },
 				hitPct: billed > 0 ? Math.round((r.cacheRead / billed) * 10000) / 100 : 0,
-				sharePct: grand > 0 ? Math.round(((r.uncached + r.output) / grand) * 10000) / 100 : 0,
+				sharePct: grand > 0 ? Math.round((ov / grand) * 10000) / 100 : 0,
 			};
 		})
-		.sort((a, b) => b.totals.uncached + b.totals.output - (a.totals.uncached + a.totals.output));
+		.sort((a, b) => overallOf(b) - overallOf(a));
 }
 //#endregion
 

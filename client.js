@@ -388,6 +388,22 @@ window.__ModuleLoader__.load({
 			"  display: block; height: 100%; background: linear-gradient(90deg, var(--tdb-accent-in), var(--tdb-accent-out));",
 			"  border-radius: 2px;",
 			"}",
+			// 模型面板：按提供商分组头（组名 + 组内汇总）
+			"dsh-token-dashboard .tdb-mgroup{",
+			"  display: flex; align-items: baseline; gap: 8px; margin-top: 8px; padding: 3px 2px 0;",
+			"}",
+			"dsh-token-dashboard .tdb-mgroup:first-child{ margin-top: 0; }",
+			"dsh-token-dashboard .tdb-mg-name{",
+			"  font-family: var(--tdb-mono); font-size: 12px; font-weight: 700; color: var(--tdb-fg);",
+			"  white-space: nowrap;",
+			"}",
+			"dsh-token-dashboard .tdb-mg-total{",
+			"  font-size: 10px; color: var(--tdb-fg-muted); flex: 1; min-width: 0;",
+			"  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;",
+			"}",
+			"dsh-token-dashboard .tdb-mg-pct{",
+			"  font-family: var(--tdb-mono); font-size: 11px; color: var(--tdb-accent-in); white-space: nowrap;",
+			"}",
 			// DeepSeek 余额面板
 			"dsh-token-dashboard .tdb-ds-note{",
 			"  font-size: 11px; color: var(--tdb-fg-muted); padding: 10px 8px;",
@@ -437,6 +453,11 @@ window.__ModuleLoader__.load({
 			return String(value).replace(/[&<>"']/g, function (c) {
 				return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
 			});
+		}
+		/** API 整体消耗 = 全部 token（uncached 输入 + 缓存读取 + 缓存写入 + 输出）。
+		 *  不再按计费口径折算——未计费环境下直接统计整体流量。 */
+		function overall(t) {
+			return (t.uncached || 0) + (t.cacheRead || 0) + (t.cacheWrite || 0) + (t.output || 0);
 		}
 		/** 紧凑的 token 格式化：1.2K / 3.4M / 517。 */
 		function fmt(n) {
@@ -645,6 +666,9 @@ window.__ModuleLoader__.load({
 				"      </div>",
 				"    </div>",
 				"    <div class=\"tdb-pane tdb-pane-model\" hidden=\"\">",
+				"      <div class=\"tdb-selrow\">",
+				"        <select class=\"tdb-select tdb-mfilter\" aria-label=\"筛选提供商\"></select>",
+				"      </div>",
 				"      <div class=\"tdb-mlist\"><div class=\"tdb-empty\">暂无模型数据</div></div>",
 				"    </div>",
 				"    <div class=\"tdb-pane tdb-pane-deepseek\" hidden=\"\">",
@@ -720,12 +744,15 @@ window.__ModuleLoader__.load({
 			var tab = readStore("tab", "session");
 			if (tab !== "all" && tab !== "session" && tab !== "model" && tab !== "deepseek") tab = "session";
 			var TAB_ORDER = ["all", "session", "model", "deepseek"];
+			/** 模型面板的提供商筛选（"" = 全部提供商）。 */
+			var mFilter = readStore("mfilter", "");
 			var tabBtns = root.querySelectorAll(".tdb-tab");
 			var paneAll = root.querySelector(".tdb-pane-all");
 			var paneSession = root.querySelector(".tdb-pane-session");
 			var paneModel = root.querySelector(".tdb-pane-model");
 			var paneDeepseek = root.querySelector(".tdb-pane-deepseek");
 			var mlistEl = root.querySelector(".tdb-mlist");
+			var mFilterEl = root.querySelector(".tdb-mfilter");
 			var dsNote = root.querySelector(".tdb-ds-note");
 			var dsMeta = root.querySelector(".tdb-ds-meta");
 			var dsEls = {};
@@ -763,7 +790,7 @@ window.__ModuleLoader__.load({
 				out: { label: "输出", color: "var(--tdb-accent-out)", unit: "tok", pick: function (s) { return s.out; } },
 				in: { label: "输入 · uncached", color: "var(--tdb-accent-in)", unit: "tok", pick: function (s) { return s.in; } },
 				cr: { label: "缓存读取", color: "var(--tdb-accent-cr)", unit: "tok", pick: function (s) { return s.cr; } },
-				total: { label: "总消耗(输入+输出)", color: "var(--tdb-accent-ctx)", unit: "tok", pick: function (s) { return s.in + s.out; } },
+				total: { label: "总消耗(整体)", color: "var(--tdb-accent-ctx)", unit: "tok", pick: function (s) { return s.in + s.cr + (s.cw || 0) + s.out; } },
 				calls: { label: "API 调用次数", color: "var(--tdb-accent-calls)", unit: "次", pick: function (s) { return typeof s.calls === "number" ? s.calls : 0; } },
 			};
 
@@ -943,9 +970,9 @@ window.__ModuleLoader__.load({
 				aels.calls.parentElement.title = aCalls === null
 					? "数据源未上报调用次数"
 					: "当前时间范围内所有会话的 API 调用次数(每次模型回复计 1 次)";
-				// 总消耗 = 仅 uncached 输入 + 输出（缓存读写
-				// 已打折/零计价，因此不纳入消耗统计）。
-				var totalVals = series.map(function (s) { return s.in + s.out; });
+				// 总消耗 = API 整体消耗（uncached 输入 + 缓存读取 +
+				// 缓存写入 + 输出），未计费环境直接统计整体流量。
+				var totalVals = series.map(function (s) { return s.in + s.cr + (s.cw || 0) + s.out; });
 				renderMetricChart(ac1, ac1leg, series, aMetric);
 				renderChart(ac2, ac2leg, totalVals, {
 					color: "var(--tdb-accent-in)",
@@ -954,7 +981,7 @@ window.__ModuleLoader__.load({
 					legend: totalVals.length >= 2 ? "峰值 " + fmt(Math.max.apply(null, totalVals)) + " · " + totalVals.length + slotUnit() : "",
 					tooltip: function (i) {
 						var s = series[i];
-						return "<b>" + fmt(s.in + s.out) + " tok</b>总消耗(输入+输出)" +
+						return "<b>" + fmt(s.in + s.cr + (s.cw || 0) + s.out) + " tok</b>总消耗(整体)" +
 							'<span class="tdb-tip-time">' + tf(s.t) + "</span>";
 					},
 					emptyMsg: "暂无消耗数据",
@@ -1001,8 +1028,9 @@ window.__ModuleLoader__.load({
 				els.calls.parentElement.title = sCalls === null
 					? "数据源未上报调用次数"
 					: "当前时间范围内本会话的 API 调用次数(每次模型回复计 1 次)";
-				// 总消耗 = 仅 uncached 输入 + 输出。
-				var totalVals = series.map(function (s) { return s.in + s.out; });
+				// 总消耗 = API 整体消耗（uncached 输入 + 缓存读取 +
+				// 缓存写入 + 输出）。
+				var totalVals = series.map(function (s) { return s.in + s.cr + (s.cw || 0) + s.out; });
 				renderMetricChart(c1, c1leg, series, sMetric);
 				renderChart(c2, c2leg, totalVals, {
 					color: "var(--tdb-accent-in)",
@@ -1011,49 +1039,97 @@ window.__ModuleLoader__.load({
 					legend: totalVals.length >= 2 ? "峰值 " + fmt(Math.max.apply(null, totalVals)) + " · " + totalVals.length + slotUnit() : "",
 					tooltip: function (i) {
 						var s = series[i];
-						return "<b>" + fmt(s.in + s.out) + " tok</b>总消耗(输入+输出)" +
+						return "<b>" + fmt(s.in + s.cr + (s.cw || 0) + s.out) + " tok</b>总消耗(整体)" +
 							'<span class="tdb-tip-time">' + tf(s.t) + "</span>";
 					},
 					emptyMsg: "暂无消耗数据",
 				});
 			}
 
-			/** 渲染模型面板：每个 provider/模型一张卡片，展示窗口内
-			 *  token 明细、占总体消耗的比例以及缓存命中率。 */
+			/** 渲染模型面板：按提供商分组，每组一个标题 + 组内汇总，
+			 *  组内每模型一张卡片，展示窗口内 token 明细、占总体消耗的
+			 *  比例以及缓存命中率。顶部的下拉可按提供商筛选。 */
 			function renderPaneModel() {
 				var models = data && Array.isArray(data.models) ? data.models : [];
+				// 重建筛选下拉的选项（保留当前选择；新的提供商出现时自动补充）。
+				var filter = mFilter;
+				var provs = [];
+				for (var fi = 0; fi < models.length; fi++) {
+					var fp = (typeof models[fi].provider === "string" && models[fi].provider !== "" && models[fi].provider !== "未知")
+						? models[fi].provider
+						: "未知提供商";
+					if (provs.indexOf(fp) === -1) provs.push(fp);
+				}
+				var opts = '<option value="">全部提供商</option>';
+				for (var pi = 0; pi < provs.length; pi++) {
+					opts += '<option value="' + esc(provs[pi]) + '"' + (filter === provs[pi] ? ' selected' : '') + '>' + esc(provs[pi]) + '</option>';
+				}
+				mFilterEl.innerHTML = opts;
+				if (filter !== "" && provs.indexOf(filter) === -1) filter = "";
+				mFilter = filter;
 				if (models.length === 0) {
 					mlistEl.innerHTML = '<div class="tdb-empty">暂无模型数据</div>';
 					return;
 				}
-				var cards = [];
+				// 按提供商分组，保持首次出现顺序；组内保持原顺序（按占比降序）。
+				var groups = [];
+				var gIndex = {};
 				for (var i = 0; i < models.length; i++) {
 					var m = models[i];
-					var t = m.totals || {};
-					var total = (t.uncached || 0) + (t.output || 0);
-					var share = typeof m.sharePct === "number" ? m.sharePct : 0;
-					var hit = typeof m.hitPct === "number" ? m.hitPct : 0;
-					var prov = (typeof m.provider === "string" && m.provider !== "" && m.provider !== "未知")
-						? esc(m.provider)
+					var p = (typeof m.provider === "string" && m.provider !== "" && m.provider !== "未知")
+						? m.provider
 						: "未知提供商";
-					var hitTxt = hit > 0 ? "命中 " + hit.toFixed(1) + "%" : "命中率 —";
-					var mCalls = typeof t.calls === "number" ? t.calls : null;
-					cards.push(
-						'<div class="tdb-mcard">' +
-						'<div class="tdb-mtop"><b class="tdb-mname" title="提供商: ' + esc(m.provider || "未知") + '">' + esc(m.model || "未知") + '</b>' +
-						'<span class="tdb-mprov">' + prov + '</span><span class="tdb-mpct">' + share.toFixed(1) + '%</span></div>' +
-						'<div class="tdb-mgrid">' +
-						'<div class="tdb-cell tdb-c-in"><b>' + fmt(t.uncached) + '</b><span><i class="tdb-i"></i>输入 · uncached</span></div>' +
-						'<div class="tdb-cell tdb-c-cr"><b>' + fmt(t.cacheRead) + '</b><span><i class="tdb-i"></i>缓存读取</span></div>' +
-						'<div class="tdb-cell tdb-c-out"><b>' + fmt(t.output) + '</b><span><i class="tdb-i"></i>输出</span></div>' +
-						'<div class="tdb-cell tdb-c-calls" title="' + (mCalls === null ? '数据源未上报调用次数' : '当前时间范围内该模型的 API 调用次数') + '"><b>' + (mCalls === null ? "—" : String(mCalls)) + '</b><span><i class="tdb-i"></i>API 调用次数</span></div>' +
-						'<div class="tdb-cell tdb-mtot"><b>' + fmt(total) + '</b><span>总消耗(输入+输出) · ' + hitTxt + '</span></div>' +
-						'</div>' +
-						'<div class="tdb-mbar"><i style="width:' + Math.min(100, Math.max(0.5, share)) + '%"></i></div>' +
+					if (filter !== "" && p !== filter) continue; // 筛选：只保留选中的提供商
+					var gi = gIndex[p];
+					if (gi === undefined) {
+						gi = groups.length;
+						gIndex[p] = gi;
+						groups.push({ provider: p, models: [] });
+					}
+					groups[gi].models.push(m);
+				}
+				var out = [];
+				for (var g = 0; g < groups.length; g++) {
+					var grp = groups[g];
+					var gTotal = 0;
+					var gShare = 0;
+					for (var j = 0; j < grp.models.length; j++) {
+						var gj = grp.models[j].totals || {};
+						gTotal += overall(gj);
+						gShare += typeof grp.models[j].sharePct === "number" ? grp.models[j].sharePct : 0;
+					}
+					out.push(
+						'<div class="tdb-mgroup">' +
+						'<span class="tdb-mg-name" title="提供商">' + esc(grp.provider) + '</span>' +
+						'<span class="tdb-mg-total">' + grp.models.length + ' 个模型 · ' + fmt(gTotal) + ' tok</span>' +
+						'<span class="tdb-mg-pct">' + gShare.toFixed(1) + '%</span>' +
 						'</div>'
 					);
+					for (var k = 0; k < grp.models.length; k++) {
+						var mm = grp.models[k];
+						var t = mm.totals || {};
+						var total = overall(t);
+						var share = typeof mm.sharePct === "number" ? mm.sharePct : 0;
+						var hit = typeof mm.hitPct === "number" ? mm.hitPct : 0;
+						var hitTxt = hit > 0 ? "命中 " + hit.toFixed(1) + "%" : "命中率 —";
+						var mCalls = typeof t.calls === "number" ? t.calls : null;
+						out.push(
+							'<div class="tdb-mcard">' +
+							'<div class="tdb-mtop"><b class="tdb-mname" title="提供商: ' + esc(mm.provider || "未知") + '">' + esc(mm.model || "未知") + '</b>' +
+							'<span class="tdb-mprov">' + esc(grp.provider) + '</span><span class="tdb-mpct">' + share.toFixed(1) + '%</span></div>' +
+							'<div class="tdb-mgrid">' +
+							'<div class="tdb-cell tdb-c-in"><b>' + fmt(t.uncached) + '</b><span><i class="tdb-i"></i>输入 · uncached</span></div>' +
+							'<div class="tdb-cell tdb-c-cr"><b>' + fmt(t.cacheRead) + '</b><span><i class="tdb-i"></i>缓存读取</span></div>' +
+							'<div class="tdb-cell tdb-c-out"><b>' + fmt(t.output) + '</b><span><i class="tdb-i"></i>输出</span></div>' +
+							'<div class="tdb-cell tdb-c-calls" title="' + (mCalls === null ? '数据源未上报调用次数' : '当前时间范围内该模型的 API 调用次数') + '"><b>' + (mCalls === null ? "—" : String(mCalls)) + '</b><span><i class="tdb-i"></i>API 调用次数</span></div>' +
+							'<div class="tdb-cell tdb-mtot"><b>' + fmt(total) + '</b><span>总消耗(整体) · ' + hitTxt + '</span></div>' +
+							'</div>' +
+							'<div class="tdb-mbar"><i style="width:' + Math.min(100, Math.max(0.5, share)) + '%"></i></div>' +
+							'</div>'
+						);
+					}
 				}
-				mlistEl.innerHTML = cards.join("");
+				mlistEl.innerHTML = out.join("");
 			}
 
 			/** 渲染 DeepSeek 面板：官方账户余额（未配置密钥或 fetch 失败时
@@ -1211,11 +1287,11 @@ window.__ModuleLoader__.load({
 					if (mods.length > 0) {
 						var mTop = mods[0];
 						var mT = mTop.totals || {};
-						summary.innerHTML = '<span class="tdb-s-chip"><b>' + esc(fmt((mT.uncached || 0) + (mT.output || 0))) + '</b> ' + esc(mTop.model || "未知") + '</span>';
+						summary.innerHTML = '<span class="tdb-s-chip"><b>' + esc(fmt(overall(mT))) + '</b> ' + esc(mTop.model || "未知") + '</span>';
 						var mTotal = 0;
 						for (var mi = 0; mi < mods.length; mi++) {
 							var mt = mods[mi].totals || {};
-							mTotal += (mt.uncached || 0) + (mt.output || 0);
+							mTotal += overall(mt);
 						}
 						fUpdated.textContent = mods.length + " 个模型 · " + fmt(mTotal) + " tok";
 						fUpdated.title = "范围: " + (range === "all" ? "全部" : range === "30d" ? "1月" : range === "7d" ? "1周" : range === "1d" ? "1天" : "1小时");
@@ -1284,8 +1360,8 @@ window.__ModuleLoader__.load({
 				if (aTot) {
 					var ab = (aTot.uncached || 0) + (aTot.cacheRead || 0) + (aTot.cacheWrite || 0);
 					var ahit = ab > 0 ? ((aTot.cacheRead || 0) / ab) * 100 : null;
-					mB.total.textContent = fmt((aTot.uncached || 0) + (aTot.output || 0));
-					mB.total.parentElement.title = "总消耗(输入+输出)";
+					mB.total.textContent = fmt(overall(aTot));
+					mB.total.parentElement.title = "总消耗(整体)";
 					mB.in.textContent = fmt(aTot.uncached);
 					mB.in.parentElement.title = "输入 · uncached";
 					mB.out.textContent = fmt(aTot.output);
@@ -1306,8 +1382,8 @@ window.__ModuleLoader__.load({
 				if (sess && sess.totals) {
 					var sb = (sess.totals.uncached || 0) + (sess.totals.cacheRead || 0) + (sess.totals.cacheWrite || 0);
 					var shit = sb > 0 ? ((sess.totals.cacheRead || 0) / sb) * 100 : null;
-					mB.total.textContent = fmt((sess.totals.uncached || 0) + (sess.totals.output || 0));
-					mB.total.parentElement.title = "总消耗(输入+输出)";
+					mB.total.textContent = fmt(overall(sess.totals));
+					mB.total.parentElement.title = "总消耗(整体)";
 					mB.in.textContent = fmt(sess.totals.uncached);
 					mB.in.parentElement.title = "输入 · uncached";
 					mB.out.textContent = fmt(sess.totals.output);
@@ -1329,8 +1405,8 @@ window.__ModuleLoader__.load({
 					var mT = mods[0].totals;
 					var mb = (mT.uncached || 0) + (mT.cacheRead || 0) + (mT.cacheWrite || 0);
 					var mhit = mb > 0 ? ((mT.cacheRead || 0) / mb) * 100 : null;
-					mB.total.textContent = fmt((mT.uncached || 0) + (mT.output || 0));
-					mB.total.parentElement.title = "总消耗(输入+输出)";
+					mB.total.textContent = fmt(overall(mT));
+					mB.total.parentElement.title = "总消耗(整体)";
 					mB.in.textContent = fmt(mT.uncached);
 					mB.in.parentElement.title = "输入 · uncached";
 					mB.out.textContent = fmt(mT.output);
@@ -1590,6 +1666,11 @@ window.__ModuleLoader__.load({
 					selId = v; // 一个具体的会话 id
 					writeStore("session", selId);
 				}
+				render();
+			});
+			mFilterEl.addEventListener("change", function () {
+				mFilter = mFilterEl.value; // "" = 全部提供商
+				writeStore("mfilter", mFilter);
 				render();
 			});
 			for (var tb = 0; tb < tabBtns.length; tb++) {

@@ -177,10 +177,10 @@ console.log("[2] server half");
 		assert.equal(body.models[0].model, "demo-model-2", "models sorted by 总消耗 desc (model-2 first)");
 		assert.deepEqual(body.models[0].totals, { uncached: 3300, cacheRead: 2200, cacheWrite: 400, output: 1500, calls: 1 });
 		assert.equal(body.models[0].hitPct, 37.29, "model-2 hit rate 2200/5900 = 37.29%");
-		assert.equal(body.models[0].sharePct, 53.04, "model-2 burn 4800/9050 = 53.04%");
+		assert.equal(body.models[0].sharePct, 55.02, "model-2 overall 7400/13450 = 55.02%");
 		assert.deepEqual(body.models[1].totals, { uncached: 3200, cacheRead: 1350, cacheWrite: 450, output: 1050, calls: 3 });
 		assert.equal(body.models[1].hitPct, 27, "model-1 hit rate 1350/5000 = 27%");
-		assert.equal(body.models[1].sharePct, 46.96, "model-1 burn 4250/9050 = 46.96%");
+		assert.equal(body.models[1].sharePct, 44.98, "model-1 overall 6050/13450 = 44.98%");
 		assert.equal(body.models[0].provider, "demo-provider", "provider carried through");
 		// Range query parsing must actually take effect (regression: the raw query
 		// string used to be passed as the value, silently falling back to "all").
@@ -318,8 +318,8 @@ console.log("[2] server half");
 		const my = models1d.find((m) => m.model === "m-y");
 		assert.deepEqual(mx.totals, { uncached: 100, cacheRead: 10, cacheWrite: 0, output: 10, calls: 2 }, "m-x 1d totals");
 		assert.deepEqual(my.totals, { uncached: 50, cacheRead: 0, cacheWrite: 0, output: 5, calls: 1 }, "m-y 1d totals");
-		assert.equal(mx.sharePct, 66.67, "m-x burn 110/165 = 66.67%");
-		assert.equal(my.sharePct, 33.33, "m-y burn 55/165 = 33.33%");
+		assert.equal(mx.sharePct, 68.57, "m-x overall 120/175 = 68.57%");
+		assert.equal(my.sharePct, 31.43, "m-y overall 55/175 = 31.43%");
 		assert.equal(mx.hitPct, 9.09, "m-x hit 10/110 = 9.09%");
 		assert.equal(my.hitPct, 0, "m-y hit 0/50 = 0%");
 		assert.equal(models1d[0].model, "m-x", "models sorted by burn desc");
