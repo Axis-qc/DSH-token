@@ -119,7 +119,7 @@ export interface TokenDashboardPayload {
   backfillError: string | null;
   /** 窗口内所有会话合并后的汇总值。 */
   totals: TokenDashboardTotals;
-  /** 窗口内合并的每小时趋势；range=1h 时为每分钟粒度（60-61 个点）。 */
+  /** 窗口内合并的每小时趋势；range=1h 时为每分钟粒度（60-61 个点），range=30d|all 时为每天粒度。 */
   series: TokenDashboardHourSample[];
   /** 窗口内的每模型消耗，按消耗降序排列。 */
   models: TokenDashboardModel[];

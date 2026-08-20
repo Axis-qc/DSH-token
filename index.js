@@ -555,17 +555,19 @@ const MINUTE_MS = 60000;
  * 窗口内的总量和一条**连续**序列：从窗口起点到当前时刻的每个槽位
  * 都存在，空槽位以 0 填充，因此图表显示均匀的时间轴，而不是只绘制
  * 有活动的槽位。粒度默认为小时，mode 为 "minute" 时按分钟（用于
- * 1h 范围，它从 minuteBins 渲染每分钟趋势）。很长的窗口会加宽步长
- * （k 槽位桶），而不是截断历史。
+ * 1h 范围，它从 minuteBins 渲染每分钟趋势），"day" 时按天（从
+ * hourBins 折叠每天的 24 小时为一天，用于 30d/全部 范围）。很长的
+ * 窗口会加宽步长（k 槽位桶），而不是截断历史。
  * @param {ReturnType<typeof newSessionState>} state
  * @param {number} start - 窗口起点（ms 时间戳）。
  * @param {number} endMs - 窗口终点（ms 时间戳，通常为当前时刻）。
- * @param {"hour" | "minute"} [mode] - 桶粒度（默认 "hour"）。
+ * @param {"hour" | "minute" | "day"} [mode] - 桶粒度（默认 "hour"）。
  * @returns {{ totals: { uncached: number, cacheRead: number, cacheWrite: number, output: number, calls: number }, series: Array<{ t: number, in: number, cr: number, cw: number, out: number, calls: number }> }}
  */
 function sliceSession(state, start, endMs, mode) {
 	const bins = mode === "minute" ? state.minuteBins : state.hourBins;
-	const slotMs = mode === "minute" ? MINUTE_MS : HOUR_MS;
+	const binStepMs = mode === "minute" ? MINUTE_MS : HOUR_MS;
+	const slotMs = mode === "day" ? DAY_MS : binStepMs;
 	const totals = { uncached: 0, cacheRead: 0, cacheWrite: 0, output: 0, calls: 0 };
 	const startSlot = Math.floor(start / slotMs) * slotMs;
 	const endSlot = Math.floor(endMs / slotMs) * slotMs;
@@ -576,7 +578,7 @@ function sliceSession(state, start, endMs, mode) {
 	for (let t = startSlot; t <= endSlot; t += stepMs) {
 		const b = { in: 0, cr: 0, cw: 0, out: 0, calls: 0 };
 		const to = Math.min(t + stepMs, endSlot + slotMs);
-		for (let hk = t; hk < to; hk += slotMs) {
+		for (let hk = t; hk < to; hk += binStepMs) {
 			const hb = bins.get(hk);
 			if (hb) {
 				b.in += hb.in;
@@ -620,8 +622,8 @@ function aggregateWindow(sessions, rangeMs) {
 		}
 		start = earliest === Infinity ? now : earliest;
 	}
-	// 1h 范围按分钟渲染；其他范围保持按小时。
-	const mode = rangeMs === HOUR_MS ? "minute" : "hour";
+	// 1h 范围按分钟渲染；30d 与全部（null）按天渲染；其余按小时。
+	const mode = rangeMs === HOUR_MS ? "minute" : rangeMs == null || rangeMs >= 30 * DAY_MS ? "day" : "hour";
 	const totals = { uncached: 0, cacheRead: 0, cacheWrite: 0, output: 0, calls: 0 };
 	const hourMap = new Map();
 	const sessionTotals = new Map();

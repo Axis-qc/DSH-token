@@ -151,12 +151,13 @@ console.log("[2] server half");
 		assert.deepEqual(s.totals, { uncached: 6500, cacheRead: 3550, cacheWrite: 850, output: 2550, calls: 4 });
 		// Global aggregates mirror the single session under "all".
 		assert.deepEqual(body.totals, { uncached: 6500, cacheRead: 3550, cacheWrite: 850, output: 2550, calls: 4 });
-		// Payload per-session series is hour-bucketed and CONTINUOUS: all fixture
-		// events share the current hour, so the window collapses to one (or at
-		// most two around an hour boundary) hourly point carrying the whole sum.
+		// Payload per-session series for the "all" range is DAY-bucketed and
+		// CONTINUOUS: all fixture events share the current day, so the window
+		// collapses to one (or at most two around a day boundary) daily point
+		// carrying the whole sum.
 		const ps = s.series;
-		assert.ok(ps.length >= 1 && ps.length <= 2, `continuous hourly series (${ps.length} point(s))`);
-		assert.equal(ps[0].t, HKD, "series starts at the session's hour slot");
+		assert.ok(ps.length >= 1 && ps.length <= 2, `continuous daily series (${ps.length} point(s))`);
+		assert.equal(ps[0].t, Math.floor(HKD / (24 * HOUR_MS)) * (24 * HOUR_MS), "series starts at the session's day slot");
 		assert.equal(ps.reduce((a, b) => a + b.in, 0), 6500, "series carries all input");
 		assert.equal(ps.reduce((a, b) => a + b.out, 0), 2550, "series carries all output");
 		assert.ok(body.series.length >= 1 && body.series.length <= 2, "global series continuous");
@@ -284,11 +285,18 @@ console.log("[2] server half");
 		assert.ok(s1.length >= 24 && s1.length <= 26, `1d series continuous (~25 hourly points, got ${s1.length})`);
 		assert.equal(s1.reduce((a, b) => a + b.out, 0), 10, "1d series sums to window output");
 		assert.equal(s1[1].t - s1[0].t, H, "1d series steps by exactly 1 hour (no gaps/jumps)");
+		const s7 = aggregateWindow(map, rangeToMs("7d")).series;
+		assert.ok(s7.length >= 167 && s7.length <= 170, `7d series stays hourly (${s7.length} points)`);
+		assert.equal(s7[1].t - s7[0].t, H, "7d series steps by exactly 1 hour");
+		const s30 = aggregateWindow(map, rangeToMs("30d")).series;
+		assert.ok(s30.length >= 29 && s30.length <= 32, `30d series is daily (${s30.length} points)`);
+		assert.equal(s30[1].t - s30[0].t, 24 * H, "30d series steps by exactly 1 day");
+		assert.equal(s30.reduce((a, b) => a + b.out, 0), 30, "30d daily series sums to window output");
 		const all2 = aggregateWindow(map, null).series;
-		assert.ok(all2.length >= 960 && all2.length <= 1000, `all series spans the full range (${all2.length} points)`);
+		assert.ok(all2.length >= 39 && all2.length <= 42, `all series spans the full range in days (${all2.length} points)`);
 		assert.equal(all2.reduce((a, b) => a + b.out, 0), 60, "all series sums every bucket");
 		for (let i = 1; i < all2.length; i++) {
-			assert.equal(all2[i].t - all2[i - 1].t, all2[1].t - all2[0].t, "uniform step across the whole series");
+			assert.equal(all2[i].t - all2[i - 1].t, 24 * H, "uniform day step across the whole series");
 		}
 		// ── per-model aggregation window slicing ──
 		// Buckets carry `calls` exactly like the ones foldEvent builds; omitting it
@@ -371,8 +379,8 @@ console.log("[2] server half");
 		assert.ok(agg1h.series.length >= 60 && agg1h.series.length <= 61, `1h series is continuous per-minute (${agg1h.series.length} points)`);
 		assert.equal(agg1h.series[1].t - agg1h.series[0].t, 60000, "1h series steps by exactly 1 minute");
 		assert.equal(agg1h.series.reduce((a, b) => a + b.out, 0), 3, "1h series sums the window output");
-		// 30d on the same state still uses HOUR granularity → minuteBins ignored.
-		assert.equal(aggregateWindow(mmap2, rangeToMs("30d")).totals.output, 0, "hour windows ignore minute bins");
+		// 30d on the same state still uses hour bins → minuteBins ignored.
+		assert.equal(aggregateWindow(mmap2, rangeToMs("30d")).totals.output, 0, "day/hour windows ignore minute bins");
 		assert.equal(sliceSession(mn, agg1h.start, agg1h.end, "minute").totals.output, 3, "sliceSession minute mode sums minute bins");
 		ok("foldEvent replaces same (turn, step), continuous hour series + range slicing + per-model aggregation + 1h/minute granularity work");
 	} catch (err) {

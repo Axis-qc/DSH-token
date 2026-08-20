@@ -2,5 +2,8 @@
 .balance-fixture.json
 .backfill-fixture/
 
+# Scratch diff dumps (e.g. from debugging sessions).
+_temp_diff.txt
+
 # Local runtime artifacts (never part of the plugin source).
 *.log

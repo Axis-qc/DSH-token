@@ -143,6 +143,7 @@ window.__ModuleLoader__.load({
 			"}",
 			"dsh-token-dashboard .tdb-mini .tdb-mc .tdb-ml{ font-size: 9.5px; color: var(--tdb-fg-muted); }",
 			"dsh-token-dashboard .tdb-mini .tdb-mc-total b{ color: var(--tdb-accent-ctx); }",
+			"dsh-token-dashboard .tdb-mini .tdb-mc-total b.tdb-mv-balance{ color: #2ecc71; font-weight: 700; }",
 			"dsh-token-dashboard .tdb-mini .tdb-mc-in b{ color: var(--tdb-accent-in); }",
 			"dsh-token-dashboard .tdb-mini .tdb-mc-out b{ color: var(--tdb-accent-out); }",
 			"dsh-token-dashboard .tdb-mini .tdb-mc-cr b{ color: var(--tdb-accent-cr); }",
@@ -456,17 +457,22 @@ window.__ModuleLoader__.load({
 			var p = function (x) { return (x < 10 ? "0" : "") + x; };
 			return p(d.getHours()) + ":" + p(d.getMinutes()) + ":" + p(d.getSeconds());
 		}
-		/** 按小时的时间戳："M/D HH:00"。 */
+		/** 按小时的时间戳："M/D HH时"。 */
 		function dtHour(ms) {
 			var d = new Date(ms);
 			var p = function (x) { return (x < 10 ? "0" : "") + x; };
-			return (d.getMonth() + 1) + "/" + d.getDate() + " " + p(d.getHours()) + ":00";
+			return (d.getMonth() + 1) + "/" + d.getDate() + " " + p(d.getHours()) + "时";
 		}
 		/** 按分钟的时间戳："HH:MM"（用于 1h 时间范围的逐分钟序列）。 */
 		function dtMin(ms) {
 			var d = new Date(ms);
 			var p = function (x) { return (x < 10 ? "0" : "") + x; };
 			return p(d.getHours()) + ":" + p(d.getMinutes());
+		}
+		/** 按天的时间戳："M/D"（用于 30d 与全部范围的按天序列）。 */
+		function dtDay(ms) {
+			var d = new Date(ms);
+			return (d.getMonth() + 1) + "/" + d.getDate();
 		}
 		/** 限制在视口内，保证拖拽的小窗永远不会被拖出屏幕外。 */
 		function clampRect(rect) {
@@ -675,10 +681,10 @@ window.__ModuleLoader__.load({
 				"</div>",
 				"<div class=\"tdb-mini\" title=\"点击展开\">",
 				"  <span class=\"tdb-m-err\">连接失败</span>",
-				"  <span class=\"tdb-mc tdb-mc-total\"><b class=\"tdb-mv-total\">—</b><span class=\"tdb-ml\">总</span></span>",
-				"  <span class=\"tdb-mc tdb-mc-in\"><b class=\"tdb-mv-in\">—</b><span class=\"tdb-ml\">入</span></span>",
-				"  <span class=\"tdb-mc tdb-mc-out\"><b class=\"tdb-mv-out\">—</b><span class=\"tdb-ml\">出</span></span>",
-				"  <span class=\"tdb-mc tdb-mc-cr\"><b class=\"tdb-mv-cr\">—</b><span class=\"tdb-ml\">缓</span></span>",
+				"  <span class=\"tdb-mc tdb-mc-total\"><b class=\"tdb-mv-total\">—</b><span class=\"tdb-ml\">总计</span></span>",
+				"  <span class=\"tdb-mc tdb-mc-in\"><b class=\"tdb-mv-in\">—</b><span class=\"tdb-ml\">输入</span></span>",
+				"  <span class=\"tdb-mc tdb-mc-out\"><b class=\"tdb-mv-out\">—</b><span class=\"tdb-ml\">输出</span></span>",
+				"  <span class=\"tdb-mc tdb-mc-cr\"><b class=\"tdb-mv-cr\">—</b><span class=\"tdb-ml\">缓存</span></span>",
 				"  <span class=\"tdb-mc tdb-mc-hit\"><b class=\"tdb-mv-hit\">—</b><span class=\"tdb-ml\">命中</span></span>",
 				"  <span class=\"tdb-mc tdb-mc-calls\"><b class=\"tdb-mv-calls\">—</b><span class=\"tdb-ml\">调用</span></span>",
 				"</div>"
@@ -896,12 +902,12 @@ window.__ModuleLoader__.load({
 				svg.addEventListener("touchend", onLeave);
 			}
 
-			/** 感知时间范围的横轴标签：1h 范围用分钟，其余用小时。 */
-			var tf = function (ms) { return range === "1h" ? dtMin(ms) : dtHour(ms); };
-			/** 趋势点单位标签：1h 范围用「分」，否则用「时」。随 range 动态计算，
-			 *  因为用户切换范围后 legend 需立即反映新的时间粒度（不能只在加载时
-			 *  求值一次，否则 1h → 30d 后单位会卡在「分」）。 */
-			var slotUnit = function () { return range === "1h" ? " 分" : " 时"; };
+			/** 感知时间范围的横轴标签：1h 用分钟，1d/7d 用小时，30d/全部用天。 */
+			var tf = function (ms) { return range === "1h" ? dtMin(ms) : range === "30d" || range === "all" ? dtDay(ms) : dtHour(ms); };
+			/** 趋势点单位标签：1h「分」、1d/7d「时」、30d/全部「天」。随 range
+			 *  动态计算：因为用户切换范围后 legend 需立即反映新的时间粒度
+			 *  （不能只在加载时求值一次，否则 1h → 30d 后单位会卡在「分」）。 */
+			var slotUnit = function () { return range === "1h" ? " 分" : range === "30d" || range === "all" ? " 天" : " 时"; };
 
 			/** 渲染总消耗（聚合）面板：累计字段直接求和、
 			 *  加权总命中率，不含上下文占用率（这是瞬时性的
@@ -1256,32 +1262,115 @@ window.__ModuleLoader__.load({
 				}
 				updateSelect();
 
-				// 迷你胶囊（折叠态）：当前时间窗口内全部会话汇总的
-				// 6 项核心指标（总消耗/输入/输出/缓存读取/命中率/API 调用）。
-				miniEl.classList.toggle("err", !!error);
-				miniEl.title = error ? String(error) : "全部会话汇总 · 点击展开";
-				var mB = {};
-				[["total", ".tdb-mv-total"], ["in", ".tdb-mv-in"], ["out", ".tdb-mv-out"], ["cr", ".tdb-mv-cr"], ["hit", ".tdb-mv-hit"], ["calls", ".tdb-mv-calls"]].forEach(function (p) { mB[p[0]] = miniEl.querySelector(p[1]); });
-				var mTot = data && data.totals ? data.totals : null;
-				if (mTot) {
-					var mbilled = (mTot.uncached || 0) + (mTot.cacheRead || 0) + (mTot.cacheWrite || 0);
-					var mhit = mbilled > 0 ? ((mTot.cacheRead || 0) / mbilled) * 100 : null;
-					mB.total.textContent = fmt((mTot.uncached || 0) + (mTot.output || 0));
+				// 迷你胶囊（折叠态）：跟随当前活动标签页与时间范围显示对应汇总。
+			// all/总消耗：全部会话聚合；session/会话：当前选中会话；
+			// model/模型：占比最高的模型；deepseek/DeepSeek：官方余额。
+			miniEl.classList.toggle("err", !!error);
+			var rangeLabel = range === "all" ? "全部" : range === "30d" ? "1月" : range === "7d" ? "1周" : range === "1d" ? "1天" : "1小时";
+			var mB = {};
+			[["total", ".tdb-mv-total"], ["in", ".tdb-mv-in"], ["out", ".tdb-mv-out"], ["cr", ".tdb-mv-cr"], ["hit", ".tdb-mv-hit"], ["calls", ".tdb-mv-calls"]].forEach(function (p) { mB[p[0]] = miniEl.querySelector(p[1]); });
+			var mLabelEls = {};
+			[["total", ".tdb-mc-total"], ["in", ".tdb-mc-in"], ["out", ".tdb-mc-out"], ["cr", ".tdb-mc-cr"], ["hit", ".tdb-mc-hit"], ["calls", ".tdb-mc-calls"]].forEach(function (p) { mLabelEls[p[0]] = miniEl.querySelector(p[1] + " .tdb-ml"); });
+			// 胶囊标签：deepseek 余额模式下切换为余额相关标签，其余标签页恢复 token 标签。
+			var mTokenLabels = { total: "总计", in: "输入", out: "输出", cr: "缓存", hit: "命中", calls: "调用" };
+			var mBalanceLabels = { total: "余额", in: "赠送", out: "充值", cr: "1h耗", hit: "24h耗", calls: "累计耗" };
+			var mLabelSet = tab === "deepseek" ? mBalanceLabels : mTokenLabels;
+			for (var mlk in mLabelSet) if (mLabelEls[mlk]) mLabelEls[mlk].textContent = mLabelSet[mlk];
+			mB.total.classList.remove("tdb-mv-balance");
+
+			if (tab === "all") {
+				miniEl.title = error ? String(error) : "全部会话汇总（" + rangeLabel + "）· 点击展开";
+				var aTot = data && data.totals ? data.totals : null;
+				if (aTot) {
+					var ab = (aTot.uncached || 0) + (aTot.cacheRead || 0) + (aTot.cacheWrite || 0);
+					var ahit = ab > 0 ? ((aTot.cacheRead || 0) / ab) * 100 : null;
+					mB.total.textContent = fmt((aTot.uncached || 0) + (aTot.output || 0));
 					mB.total.parentElement.title = "总消耗(输入+输出)";
-					mB.in.textContent = fmt(mTot.uncached);
+					mB.in.textContent = fmt(aTot.uncached);
 					mB.in.parentElement.title = "输入 · uncached";
-					mB.out.textContent = fmt(mTot.output);
+					mB.out.textContent = fmt(aTot.output);
 					mB.out.parentElement.title = "输出";
-					mB.cr.textContent = fmt(mTot.cacheRead);
+					mB.cr.textContent = fmt(aTot.cacheRead);
+					mB.cr.parentElement.title = "缓存读取";
+					mB.hit.textContent = ahit === null ? "—" : ahit.toFixed(0) + "%";
+					mB.hit.parentElement.title = ahit === null ? "总命中率" : "总命中率 " + ahit.toFixed(1) + "%";
+					var aCalls = typeof aTot.calls === "number" ? aTot.calls : null;
+					mB.calls.textContent = aCalls === null ? "—" : String(aCalls);
+					mB.calls.parentElement.title = aCalls === null ? "数据源未上报调用次数" : "API 调用次数(每次模型回复计 1 次)";
+				} else {
+					for (var mk in mB) mB[mk].textContent = "—";
+				}
+			} else if (tab === "session") {
+				miniEl.title = error ? String(error) : "当前会话（" + rangeLabel + "）· 点击展开";
+				var sess = selectedSession();
+				if (sess && sess.totals) {
+					var sb = (sess.totals.uncached || 0) + (sess.totals.cacheRead || 0) + (sess.totals.cacheWrite || 0);
+					var shit = sb > 0 ? ((sess.totals.cacheRead || 0) / sb) * 100 : null;
+					mB.total.textContent = fmt((sess.totals.uncached || 0) + (sess.totals.output || 0));
+					mB.total.parentElement.title = "总消耗(输入+输出)";
+					mB.in.textContent = fmt(sess.totals.uncached);
+					mB.in.parentElement.title = "输入 · uncached";
+					mB.out.textContent = fmt(sess.totals.output);
+					mB.out.parentElement.title = "输出";
+					mB.cr.textContent = fmt(sess.totals.cacheRead);
+					mB.cr.parentElement.title = "缓存读取";
+					mB.hit.textContent = shit === null ? "—" : shit.toFixed(0) + "%";
+					mB.hit.parentElement.title = shit === null ? "总命中率" : "总命中率 " + shit.toFixed(1) + "%";
+					var sCalls = typeof sess.totals.calls === "number" ? sess.totals.calls : null;
+					mB.calls.textContent = sCalls === null ? "—" : String(sCalls);
+					mB.calls.parentElement.title = sCalls === null ? "数据源未上报调用次数" : "API 调用次数(每次模型回复计 1 次)";
+				} else {
+					for (var mk in mB) mB[mk].textContent = "—";
+				}
+			} else if (tab === "model") {
+				miniEl.title = error ? String(error) : "主力模型（" + rangeLabel + "）· 点击展开";
+				var mods = data && Array.isArray(data.models) ? data.models : [];
+				if (mods.length > 0 && mods[0].totals) {
+					var mT = mods[0].totals;
+					var mb = (mT.uncached || 0) + (mT.cacheRead || 0) + (mT.cacheWrite || 0);
+					var mhit = mb > 0 ? ((mT.cacheRead || 0) / mb) * 100 : null;
+					mB.total.textContent = fmt((mT.uncached || 0) + (mT.output || 0));
+					mB.total.parentElement.title = "总消耗(输入+输出)";
+					mB.in.textContent = fmt(mT.uncached);
+					mB.in.parentElement.title = "输入 · uncached";
+					mB.out.textContent = fmt(mT.output);
+					mB.out.parentElement.title = "输出";
+					mB.cr.textContent = fmt(mT.cacheRead);
 					mB.cr.parentElement.title = "缓存读取";
 					mB.hit.textContent = mhit === null ? "—" : mhit.toFixed(0) + "%";
 					mB.hit.parentElement.title = mhit === null ? "总命中率" : "总命中率 " + mhit.toFixed(1) + "%";
-					var mCalls = typeof mTot.calls === "number" ? mTot.calls : null;
+					var mCalls = typeof mT.calls === "number" ? mT.calls : null;
 					mB.calls.textContent = mCalls === null ? "—" : String(mCalls);
 					mB.calls.parentElement.title = mCalls === null ? "数据源未上报调用次数" : "API 调用次数(每次模型回复计 1 次)";
 				} else {
 					for (var mk in mB) mB[mk].textContent = "—";
 				}
+			} else if (tab === "deepseek") {
+				miniEl.title = error ? String(error) : "DeepSeek 余额（" + rangeLabel + "）· 点击展开";
+				var db = data && data.balance ? data.balance : null;
+				var di = db && db.ok && Array.isArray(db.infos) && db.infos.length > 0 ? db.infos[0] : null;
+				var dTotal = di && typeof di.total === "number" && Number.isFinite(di.total) ? di.total : null;
+				var dGranted = di && typeof di.granted === "number" && Number.isFinite(di.granted) ? di.granted : null;
+				var dTopped = di && typeof di.topped === "number" && Number.isFinite(di.topped) ? di.topped : null;
+				var dC = db && db.consumed ? db.consumed : null;
+				var fmtC = function (cv) {
+					if (cv === null || typeof cv !== "number" || !Number.isFinite(cv)) return "—";
+					return (cv < 0 ? "↑" : "−") + "¥" + Math.abs(cv).toFixed(2);
+				};
+				mB.total.textContent = dTotal === null ? "—" : "¥" + dTotal.toFixed(2);
+				mB.total.parentElement.title = dTotal === null ? "总余额" : "总余额 ¥" + dTotal.toFixed(2);
+				mB.total.classList.add("tdb-mv-balance");
+				mB.in.textContent = dGranted === null ? "—" : "¥" + dGranted.toFixed(2);
+				mB.in.parentElement.title = "赠送余额";
+				mB.out.textContent = dTopped === null ? "—" : "¥" + dTopped.toFixed(2);
+				mB.out.parentElement.title = "充值余额";
+				mB.cr.textContent = fmtC(dC ? dC.h1 : null);
+				mB.cr.parentElement.title = "近1小时余额消耗";
+				mB.hit.textContent = fmtC(dC ? dC.d1 : null);
+				mB.hit.parentElement.title = "近24小时余额消耗";
+				mB.calls.textContent = fmtC(dC ? dC.all : null);
+				mB.calls.parentElement.title = "自监控以来余额消耗";
+			}
 			}
 
 			/** 供选择器使用的人类可读会话标签：派生的标题（首条用户消息）→
