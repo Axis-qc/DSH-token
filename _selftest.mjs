@@ -366,6 +366,36 @@ console.log("[2] server half");
 		writeFileSync(tmpFile, "{ not json");
 		assert.deepEqual(loadBalanceHistory(tmpFile, 10), [], "corrupt file → [] without throwing");
 		rmSync(tmpFile, { force: true });
+		// ── computeConsumed: windowed balance-drop accumulation ──
+		const { computeConsumed } = module._internal;
+		const now0 = 1800000000000; // fixed "now" for deterministic windows
+		const MIN = 60000, HOUR = 3600000, DAY = 86400000;
+		const hrsAgo = (n) => now0 - n * HOUR;
+		const sample = (t, total) => ({ t, total, granted: 0, topped: total });
+		// Pure consumption: h1 ⊂ d1 ⊂ d7, strictly cumulative. Totals chosen as
+		// exact binary fractions so the deepEqual below is float-exact.
+		const mono = [sample(hrsAgo(2), 10), sample(hrsAgo(1.5), 9.5), sample(hrsAgo(1), 9), sample(hrsAgo(0.5), 8.75), sample(now0, 8.5)];
+		assert.deepEqual(computeConsumed(mono, now0), { h1: 0.5, d1: 1.5, d7: 1.5, all: 1.5 }, "pure consumption accumulates drops per window");
+		// Top-up mid-window: the rising segment counts 0, never negative, still nested.
+		const topped = [sample(hrsAgo(2), 10), sample(hrsAgo(1), 9.5), sample(hrsAgo(0.5), 19.75), sample(now0, 19.5)];
+		const cTop = computeConsumed(topped, now0);
+		assert.equal(cTop.h1, 0.25, "top-up segment contributes 0 (no negative consumption)");
+		assert.equal(cTop.d1, 0.75, "d1 sums only real drops");
+		assert.ok(cTop.d1 >= cTop.h1 && cTop.d7 >= cTop.d1 && cTop.all >= cTop.d7, "windows stay nested after a top-up");
+		assert.ok(!Object.values(cTop).some((v) => v !== null && v < 0), "no negative consumption ever");
+		// Window-boundary proration: straddling segment scaled by time overlap.
+		const prorated = [sample(now0 - 90 * MIN, 10), sample(now0 - 45 * MIN, 7), sample(now0, 4)];
+		assert.deepEqual(computeConsumed(prorated, now0), { h1: 4, d1: 6, d7: 6, all: 6 }, "h1 prorates the straddling 15min of the first drop, d1 counts it fully");
+		// Old-code regression: h1=0.06 / d1=4.91 / d7=0.25 style breaks nesting;
+		// with drop accumulation d7 ≥ d1 ≥ h1 holds even across a top-up.
+		const reg = [sample(now0 - 10 * DAY, 5), sample(now0 - 8 * DAY, 4.9), sample(now0 - 3 * DAY, 15), sample(now0 - 1 * DAY, 14.5), sample(now0 - 6 * HOUR, 14.3), sample(now0 - 2 * HOUR, 14.1), sample(now0 - 30 * MIN, 13.9), sample(now0, 13.8)];
+		const cReg = computeConsumed(reg, now0);
+		assert.ok(cReg.h1 > 0, "regression: h1 positive");
+		assert.ok(cReg.h1 <= cReg.d1 && cReg.d1 <= cReg.d7 && cReg.d7 <= cReg.all, "regression: windows strictly nested (d7 ≥ d1 ≥ h1)");
+		// Empty history → nulls; single sample → zeros (no drops observed).
+		assert.deepEqual(computeConsumed([], now0), { h1: null, d1: null, d7: null, all: null }, "empty history → all null");
+		assert.deepEqual(computeConsumed([sample(now0, 8.5)], now0), { h1: 0, d1: 0, d7: 0, all: 0 }, "single sample → zeros");
+		ok("computeConsumed: nested cumulative windows, top-up-safe, boundary proration");
 		// ── 1h range: per-minute granularity from minuteBins ──
 		const mn = newSessionState("mn");
 		const M = 60000;

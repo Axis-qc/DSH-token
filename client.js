@@ -1146,21 +1146,21 @@ window.__ModuleLoader__.load({
 				dsEls.total.textContent = v.total;
 				dsEls.granted.textContent = v.granted;
 				dsEls.topped.textContent = v.topped;
-				// 各时间窗内的余额降幅（¥，负值表示余额增加，
-				// 例如窗口中途有充值/赠送到账）。
+				// 各时间窗内的余额下降量累计（¥）。服务端按采样段累计余额
+				// 下降量，充值/赠送到账不计为消耗，因此不会为负；窗口边界
+				// 跨采样段时按时间占比折算（近似）。
 				var c = b && b.consumed ? b.consumed : null;
 				var cKeys = [["h1", "近1小时"], ["d1", "近24小时"], ["d7", "近7天"], ["all", "自监控以来"]];
 				for (var ci = 0; ci < cKeys.length; ci++) {
 					var ck = cKeys[ci][0];
-					var cv = c && typeof c[ck] === "number" ? c[ck] : null;
+					var cv = c && typeof c[ck] === "number" ? Math.max(0, c[ck]) : null;
 					var el = dsC[ck];
 					if (cv === null) {
 						el.textContent = "—";
 						el.parentElement.title = "采样数据不足";
 					} else {
-						var neg = cv < 0;
-						el.textContent = (neg ? "↑" : "−") + "¥" + Math.abs(cv).toFixed(2);
-						el.parentElement.title = cKeys[ci][1] + "余额变化" + (neg ? "（期间余额增加，可能充值/赠送到账）" : "（近似消耗，可能含其他渠道消费，以官方账单为准）");
+						el.textContent = "−¥" + cv.toFixed(2);
+						el.parentElement.title = cKeys[ci][1] + "累计消耗（余额下降量累计，充值/赠送不计入；窗口边界按采样折算，以官方账单为准）";
 					}
 				}
 				if (!b) {
@@ -1175,7 +1175,7 @@ window.__ModuleLoader__.load({
 				} else {
 					var avail = b.is_available === false ? "账户不可用（is_available=false）" : "账户正常";
 					var cur = b.infos.length > 0 ? b.infos.map(function (i) { return String(i.currency || "?"); }).join("/") : "—";
-					dsNote.textContent = "已连接 DeepSeek 官方 API · 币种 " + cur + " · " + avail + " · 消耗为余额差额的近似值，以官方账单为准";
+					dsNote.textContent = "已连接 DeepSeek 官方 API · 币种 " + cur + " · " + avail + " · 消耗为余额下降量累计（充值/赠送不计入），以官方账单为准";
 					dsNote.className = "tdb-ds-note ok";
 				}
 				// 根据历史样本绘制的余额随时间变化曲线。
@@ -1431,7 +1431,8 @@ window.__ModuleLoader__.load({
 				var dC = db && db.consumed ? db.consumed : null;
 				var fmtC = function (cv) {
 					if (cv === null || typeof cv !== "number" || !Number.isFinite(cv)) return "—";
-					return (cv < 0 ? "↑" : "−") + "¥" + Math.abs(cv).toFixed(2);
+					// 服务端口径为余额下降量累计，不会为负；此处仅防御性截断。
+					return "−¥" + Math.max(0, cv).toFixed(2);
 				};
 				mB.total.textContent = dTotal === null ? "—" : "¥" + dTotal.toFixed(2);
 				mB.total.parentElement.title = dTotal === null ? "总余额" : "总余额 ¥" + dTotal.toFixed(2);

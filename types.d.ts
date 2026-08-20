@@ -100,8 +100,9 @@ export interface TokenDashboardBalance {
   /** 按时间顺序排列的近期样本（最新在最后）。每次成功拉取都会持久化到磁盘
    *  并在启动时重新载入，因此各时间窗口能跨重启保留。 */
   history: TokenDashboardBalanceSample[];
-  /** 近 1 小时 / 24 小时 / 7 天 / 全部窗口内的余额下降量（窗口内最新值减最旧值）；
-   *  为负说明余额上升了（窗口内有充值或赠送到账）。 */
+  /** 近 1 小时 / 24 小时 / 7 天 / 全部窗口内的余额下降量累计：相邻采样对之间余额下降
+   *  记为消耗、余额上升（充值/赠送到账）记 0，窗口边界跨采样段时按时间占比折算。
+   *  因此永不出现负值，且必然满足 h1 ≤ d1 ≤ d7 ≤ all（嵌套累计窗口）。 */
   consumed: { h1: number | null; d1: number | null; d7: number | null; all: number | null };
 }
 

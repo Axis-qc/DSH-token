@@ -836,6 +836,47 @@ function saveBalanceHistory(filePath, samples, logger) {
 }
 
 /**
+ * 计算各末尾时间窗口内的「余额下降量累计」（消耗的余额信号近似）：
+ * 遍历相邻采样对，余额下降（prev.total > cur.total）记为消耗，余额上升
+ * （充值/赠送到账）的那一段记 0；窗口边界跨段时按时间占比折算。
+ * 因此：
+ *  - 结果永不为负——充值/赠送不会产生"负消耗"；
+ *  - h1/d1/d7/all 是嵌套累计窗口，必然满足 h1 ≤ d1 ≤ d7 ≤ all
+ *    （各窗口只是同一批下降段在不同时间范围上的累加，不再是互相独立的
+ *    余额差）；
+ *  - 仍是真实余额信号（不是 token×定价的估算）。
+ * 局限：同一采样段（默认 30 分钟）内既充值又消耗时，该段的消耗会被
+ * 充值掩盖而漏计；赠送余额过期导致的余额下降会被计为消耗。
+ * @param {Array<{ t: number, total: number, granted: number, topped: number }>} hist
+ * @param {number} now - 窗口末端（ms 时间戳）。
+ * @returns {{ h1: number|null, d1: number|null, d7: number|null, all: number|null }}
+ */
+function computeConsumed(hist, now) {
+	if (!Array.isArray(hist) || hist.length === 0) return { h1: null, d1: null, d7: null, all: null };
+	const consumedIn = (windowMs) => {
+		const start = now - windowMs;
+		let total = 0;
+		for (let i = 0; i + 1 < hist.length; i++) {
+			const a = hist[i];
+			const b = hist[i + 1];
+			const segStart = Math.max(a.t, start);
+			const segEnd = Math.min(b.t, now);
+			if (segEnd <= segStart) continue;
+			const span = b.t - a.t;
+			const drop = Math.max(0, a.total - b.total);
+			total += span > 0 ? (drop * (segEnd - segStart)) / span : drop;
+		}
+		return Math.round(total * 100) / 100;
+	};
+	return {
+		h1: consumedIn(3600000),
+		d1: consumedIn(86400000),
+		d7: consumedIn(7 * 86400000),
+		all: consumedIn(Number.POSITIVE_INFINITY),
+	};
+}
+
+/**
  * 查询官方 DeepSeek 余额接口。`fetchFn` 可注入以便测试，
  * 默认使用全局 fetch。
  * @param {string} apiKey
@@ -902,40 +943,15 @@ export function apply(ctx, config = {}) {
 		infos: [],
 		/** 有序的近期采样：[{ t, total, granted, topped }]，最早的在前。 */
 		history: [],
-		/** 1h / 1d / 7d / all 各窗口内的余额下降量（窗口内最近采样对最早采样）。 */
+		/** 1h / 1d / 7d / all 各窗口内的余额下降量累计（逐段累计，充值段记 0）。 */
 		consumed: { h1: null, d1: null, d7: null, all: null },
 	};
 	const BALANCE_HISTORY_MAX = 4000;
-	/** 根据历史计算每个末尾时间窗口内的余额下降量。 */
-	function computeConsumed(now) {
-		const hist = balance.history;
-		const lookup = (windowMs) => {
-			const cur = hist.length > 0 ? hist[hist.length - 1].total : null;
-			if (typeof cur !== "number") return null;
-			let from = null;
-			for (let i = hist.length - 1; i >= 0; i--) {
-				if (hist[i].t <= now - windowMs) {
-					from = hist[i].total;
-					break;
-				}
-			}
-			if (from === null) from = hist.length > 0 ? hist[0].total : null;
-			if (typeof from !== "number") return null;
-			// 负值表示余额上升（充值/赠送）；仍上报原始差值。
-			return Math.round((cur - from) * 100) / 100;
-		};
-		return {
-			h1: lookup(3600000),
-			d1: lookup(86400000),
-			d7: lookup(7 * 86400000),
-			all: hist.length >= 2 ? Math.round((hist[hist.length - 1].total - hist[0].total) * 100) / 100 : null,
-		};
-	}
 	// 跨重启持久化：启动时从磁盘加载既有采样，这样
 	// 各窗口与曲线都能保留历史，而不是清零。
 	if (deepseekApiKey !== "") {
 		balance.history = loadBalanceHistory(balanceFile, BALANCE_HISTORY_MAX);
-		balance.consumed = computeConsumed(Date.now());
+		balance.consumed = computeConsumed(balance.history, Date.now());
 	}
 	async function refreshBalance() {
 		if (deepseekApiKey === "") {
@@ -952,7 +968,7 @@ export function apply(ctx, config = {}) {
 				if (hist.length > BALANCE_HISTORY_MAX) hist.splice(0, hist.length - BALANCE_HISTORY_MAX);
 			}
 			balance = { configured: true, ok: true, error: null, fetchedAt: now, is_available: parsed.is_available, infos: parsed.infos, history: hist, consumed: { h1: null, d1: null, d7: null, all: null } };
-			balance.consumed = computeConsumed(now);
+			balance.consumed = computeConsumed(balance.history, now);
 			// 持久化每个成功采样，使重启后仍保留历史。
 			saveBalanceHistory(balanceFile, balance.history, ctx.logger);
 		} catch (error) {
@@ -965,7 +981,7 @@ export function apply(ctx, config = {}) {
 				is_available: null,
 				infos: [],
 			};
-			balance.consumed = computeConsumed(Date.now());
+			balance.consumed = computeConsumed(balance.history, Date.now());
 		}
 	}
 
@@ -1178,6 +1194,7 @@ export const _internal = {
 	normalizeBalanceHistory,
 	loadBalanceHistory,
 	saveBalanceHistory,
+	computeConsumed,
 	defaultBalanceFile,
 	flattenContentText,
 };
