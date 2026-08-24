@@ -41,51 +41,38 @@ window.__ModuleLoader__.load({
 		var CSS = [
 			// ── 设计变量 ─────────────────────────────────────────────────
 			":host,dsh-token-dashboard{",
-			"  --tdb-font: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'PingFang SC', 'Microsoft YaHei', sans-serif;",
-			"  --tdb-mono: ui-monospace, SFMono-Regular, 'JetBrains Mono', Menlo, Consolas, monospace;",
+			"  --tdb-font: var(--dsw-font-family, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'PingFang SC', 'Microsoft YaHei', sans-serif);",
+			"  --tdb-mono: var(--ds-font-family-code, ui-monospace, SFMono-Regular, 'JetBrains Mono', Menlo, Consolas, monospace);",
 			"  --tdb-radius-sm: 6px;",
 			"  --tdb-radius-md: 10px;",
 			"  --tdb-radius-lg: 14px;",
 			"  --tdb-pad-x: 14px;",
 			"  --tdb-pad-y: 12px;",
 			"  --tdb-gap: 10px;",
-			// 深色主题（默认——系统配色为浅色时会在下方切换）
-			"  --tdb-bg: rgba(22, 22, 28, .82);",
-			"  --tdb-bg-elev: rgba(255, 255, 255, .045);",
-			"  --tdb-bg-cell: rgba(255, 255, 255, .04);",
-			"  --tdb-bg-cell-hover: rgba(255, 255, 255, .07);",
-			"  --tdb-bg-chart: rgba(255, 255, 255, .03);",
-			"  --tdb-border: rgba(255, 255, 255, .08);",
-			"  --tdb-border-strong: rgba(255, 255, 255, .14);",
-			"  --tdb-fg: #e9eaee;",
-			"  --tdb-fg-muted: rgba(233, 234, 238, .55);",
-			"  --tdb-fg-faint: rgba(233, 234, 238, .35);",
-			"  --tdb-shadow: 0 10px 32px rgba(0, 0, 0, .35), 0 2px 6px rgba(0, 0, 0, .25);",
-			"  --tdb-accent-in: #7aa2ff;",
-			"  --tdb-accent-out: #b8a5ff;",
-			"  --tdb-accent-cr: #3fb950;",
-			"  --tdb-accent-cw: #d29922;",
-			"  --tdb-accent-hit: #3fb950;",
-			"  --tdb-accent-ctx: #f778ba;",
-			"  --tdb-accent-calls: #56d4dd;",
-			"  --tdb-accent-ok: #3fb950;",
-			"  --tdb-accent-warn: #d29922;",
-			"  --tdb-accent-err: #f85149;",
-			"}",
-			"@media (prefers-color-scheme: light) {",
-			"  dsh-token-dashboard {",
-			"    --tdb-bg: rgba(252, 252, 254, .86);",
-			"    --tdb-bg-elev: rgba(0, 0, 0, .025);",
-			"    --tdb-bg-cell: rgba(0, 0, 0, .03);",
-			"    --tdb-bg-cell-hover: rgba(0, 0, 0, .055);",
-			"    --tdb-bg-chart: rgba(0, 0, 0, .02);",
-			"    --tdb-border: rgba(0, 0, 0, .08);",
-			"    --tdb-border-strong: rgba(0, 0, 0, .14);",
-			"    --tdb-fg: #1c1c20;",
-			"    --tdb-fg-muted: rgba(28, 28, 32, .55);",
-			"    --tdb-fg-faint: rgba(28, 28, 32, .32);",
-			"    --tdb-shadow: 0 10px 32px rgba(15, 18, 35, .12), 0 2px 6px rgba(15, 18, 35, .06);",
-			"  }",
+			// 颜色/字体全部优先取 DSH 设计令牌（--dsw-*/--shiki-token-*），随 DSH 主题
+			// （body[data-ds-dark-theme]）在浅色/深色/跟随系统之间自动切换；var() 的
+			// fallback 保留原配色，保证主题样式表缺席时仍可读。
+			"  --tdb-bg: var(--dsw-alias-bg-layer-1, rgba(22, 22, 28, .82));",
+			"  --tdb-bg-elev: var(--dsw-alias-bg-module-platform, rgba(255, 255, 255, .045));",
+			"  --tdb-bg-cell: var(--dsw-alias-interactive-bg-hover, rgba(255, 255, 255, .04));",
+			"  --tdb-bg-cell-hover: var(--dsw-alias-interactive-bg-hover-solid, rgba(255, 255, 255, .07));",
+			"  --tdb-bg-chart: var(--dsw-alias-bg-mask-2, rgba(255, 255, 255, .03));",
+			"  --tdb-border: var(--dsw-alias-border-l1, rgba(255, 255, 255, .08));",
+			"  --tdb-border-strong: var(--dsw-alias-border-l2, rgba(255, 255, 255, .14));",
+			"  --tdb-fg: var(--dsw-alias-label-primary, #e9eaee);",
+			"  --tdb-fg-muted: var(--dsw-alias-label-secondary, rgba(233, 234, 238, .55));",
+			"  --tdb-fg-faint: var(--dsw-alias-label-tertiary, rgba(233, 234, 238, .35));",
+			"  --tdb-shadow: var(--dsw-shadow-lv3, 0 10px 32px rgba(0, 0, 0, .35), 0 2px 6px rgba(0, 0, 0, .25));",
+			"  --tdb-accent-in: var(--dsw-static-deepseek-400, #7aa2ff);",
+			"  --tdb-accent-out: var(--shiki-token-function, #b8a5ff);",
+			"  --tdb-accent-cr: var(--dsw-alias-state-success-primary, #3fb950);",
+			"  --tdb-accent-cw: var(--dsw-alias-state-warn-primary, #d29922);",
+			"  --tdb-accent-hit: var(--dsw-alias-state-success-secondary, #3fb950);",
+			"  --tdb-accent-ctx: var(--shiki-token-keyword, #f778ba);",
+			"  --tdb-accent-calls: var(--shiki-token-link, #56d4dd);",
+			"  --tdb-accent-ok: var(--dsw-alias-state-success-primary, #3fb950);",
+			"  --tdb-accent-warn: var(--dsw-alias-state-warn-primary, #d29922);",
+			"  --tdb-accent-err: var(--dsw-alias-state-error-primary, #f85149);",
 			"}",
 			// ── 根容器 ─────────────────────────────────────────────────
 			// `position: fixed` 让元素脱离任何祖先 flex/grid 布局流，因此面板
@@ -95,14 +82,18 @@ window.__ModuleLoader__.load({
 			// （它重新启用了 pointer 事件）是可交互的，因此不会有任何不可见区域
 			// 挡住下方的 DSH UI。
 			"dsh-token-dashboard{",
-			"  all: initial; display: block; position: fixed;",
+			// 不再用 all: initial 隔离——DSH GUI 样式全按类名作用域（已核实无裸元素/
+			// 通配规则），放开继承后 --dsw-* 令牌才沿继承链生效；插件自身的规则仍
+			// 全部以 dsh-token-dashboard 前缀作用域，布局依旧完全受控。
+			"  display: block; position: fixed;",
 			"  right: 16px; bottom: 16px; z-index: 2147483000;",
 			"  width: max-content; height: max-content; max-width: 90vw; max-height: 90vh;",
 			"  pointer-events: none;",
-			"  color-scheme: light dark; font-family: var(--tdb-font); font-size: 12px; line-height: 1.5;",
+			"  color-scheme: light; font-family: var(--tdb-font); font-size: 12px; line-height: 1.5;",
 			"  color: var(--tdb-fg); user-select: none; -webkit-user-select: none;",
 			"  -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale;",
 			"}",
+			"body[data-ds-dark-theme] dsh-token-dashboard{ color-scheme: dark; }",
 			"dsh-token-dashboard *{{ box-sizing: border-box; margin: 0; padding: 0; }}",
 			// ── 面板外壳 ──────────────────────────────────────────────────
 			"dsh-token-dashboard .tdb-panel{",
@@ -143,7 +134,7 @@ window.__ModuleLoader__.load({
 			"}",
 			"dsh-token-dashboard .tdb-mini .tdb-mc .tdb-ml{ font-size: 9.5px; color: var(--tdb-fg-muted); }",
 			"dsh-token-dashboard .tdb-mini .tdb-mc-total b{ color: var(--tdb-accent-ctx); }",
-			"dsh-token-dashboard .tdb-mini .tdb-mc-total b.tdb-mv-balance{ color: #2ecc71; font-weight: 700; }",
+			"dsh-token-dashboard .tdb-mini .tdb-mc-total b.tdb-mv-balance{ color: var(--dsw-alias-state-success-primary, #2ecc71); font-weight: 700; }",
 			"dsh-token-dashboard .tdb-mini .tdb-mc-in b{ color: var(--tdb-accent-in); }",
 			"dsh-token-dashboard .tdb-mini .tdb-mc-out b{ color: var(--tdb-accent-out); }",
 			"dsh-token-dashboard .tdb-mini .tdb-mc-cr b{ color: var(--tdb-accent-cr); }",
@@ -199,9 +190,9 @@ window.__ModuleLoader__.load({
 			"dsh-token-dashboard .tdb-summary .tdb-s-chip b{",
 			"  color: var(--tdb-fg); font-weight: 600; font-size: 12px;",
 			"}",
-			"dsh-token-dashboard .tdb-summary .tdb-s-hit{ border-color: transparent; background: rgba(63, 185, 80, .12); color: var(--tdb-accent-cr); }",
+			"dsh-token-dashboard .tdb-summary .tdb-s-hit{ border-color: transparent; background: color-mix(in srgb, var(--tdb-accent-cr) 12%, transparent); color: var(--tdb-accent-cr); }",
 			"dsh-token-dashboard .tdb-summary .tdb-s-hit b{ color: var(--tdb-accent-cr); }",
-			"dsh-token-dashboard .tdb-summary .tdb-s-ctx{ border-color: transparent; background: rgba(247, 120, 186, .10); color: var(--tdb-accent-ctx); }",
+			"dsh-token-dashboard .tdb-summary .tdb-s-ctx{ border-color: transparent; background: color-mix(in srgb, var(--tdb-accent-ctx) 10%, transparent); color: var(--tdb-accent-ctx); }",
 			"dsh-token-dashboard .tdb-summary .tdb-s-ctx b{ color: var(--tdb-accent-ctx); }",
 			// 图标式按钮
 			"dsh-token-dashboard .tdb-btns{ display: flex; gap: 4px; flex: none; }",
@@ -333,7 +324,7 @@ window.__ModuleLoader__.load({
 			"  background: var(--tdb-bg); border: 1px solid var(--tdb-border-strong);",
 			"  border-radius: var(--tdb-radius-sm); padding: 6px 8px; font-size: 11px;",
 			"  color: var(--tdb-fg); font-variant-numeric: tabular-nums; line-height: 1.4;",
-			"  box-shadow: 0 4px 12px rgba(0, 0, 0, .25);",
+			"  box-shadow: var(--dsw-shadow-lv2, 0 4px 12px rgba(0, 0, 0, .25));",
 			"  opacity: 0; transition: opacity .12s ease; z-index: 2;",
 			"  max-width: 200px;",
 			"}",
@@ -557,7 +548,7 @@ window.__ModuleLoader__.load({
 		function sparkSvg(values, opts) {
 			var W = 320, H = 46, P = 3, base = opts && opts.baseline;
 			var path = sparkPath(values, W, H, P, base);
-			var color = (opts && opts.color) || "#58a6ff";
+			var color = (opts && opts.color) || "var(--dsw-static-deepseek-400, #58a6ff)";
 			var parts = [];
 			parts.push("<svg class=\"tdb-svg\" viewBox=\"0 0 " + W + " " + H + "\" preserveAspectRatio=\"none\" aria-hidden=\"true\">");
 			if (path.area) parts.push("<path d=\"" + path.area + "\" fill=\"" + color + "\" opacity=\"0.15\"/>");
