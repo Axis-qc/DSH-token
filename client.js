@@ -406,7 +406,7 @@ window.__ModuleLoader__.load({
 			"dsh-token-dashboard .tdb-ds-meta{ font-size: 10.5px; color: var(--tdb-fg-faint); text-align: right; }",
 			"dsh-token-dashboard .tdb-mlist .tdb-empty{ padding: 22px 0; }",
 			"dsh-token-dashboard .tdb-selrow .tdb-select{",
-			"  flex: 1; min-width: 0; background: var(--tdb-bg-cell); color: var(--tdb-fg);",
+			"  pointer-events: auto; flex: 1; min-width: 0; background: var(--tdb-bg-cell); color: var(--tdb-fg);",
 			"  border: 1px solid var(--tdb-border); border-radius: var(--tdb-radius-sm);",
 			"  font-size: 10.5px; padding: 3px 6px; cursor: pointer;",
 			"  font-variant-numeric: tabular-nums;",
