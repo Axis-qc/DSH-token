@@ -349,51 +349,81 @@ window.__ModuleLoader__.load({
 			"dsh-token-dashboard .tdb-tabs button.active{ background: var(--tdb-fg); color: var(--tdb-bg); font-weight: 600; }",
 			"dsh-token-dashboard .tdb-pane{ display: flex; flex-direction: column; gap: var(--tdb-gap); }",
 			"dsh-token-dashboard .tdb-pane[hidden]{ display: none !important; }",
-			// 模型面板（按模型的消耗卡片）
-			"dsh-token-dashboard .tdb-mlist{ display: flex; flex-direction: column; gap: 8px; }",
+			// 模型面板：搜索/筛选 + 可折叠提供商分组 + 紧凑模型行
+			"dsh-token-dashboard .tdb-mcontrols{ display: flex; align-items: center; gap: 6px; }",
+			"dsh-token-dashboard .tdb-msearch{",
+			"  display: flex; align-items: center; gap: 5px; flex: 1; min-width: 0;",
+			"  height: 26px; padding: 0 7px; background: var(--tdb-bg-cell);",
+			"  border: 1px solid var(--tdb-border); border-radius: var(--tdb-radius-sm);",
+			"  color: var(--tdb-fg-muted);",
+			"}",
+			"dsh-token-dashboard .tdb-msearch::before{ content: '⌕'; font-size: 16px; line-height: 1; color: var(--tdb-fg-faint); }",
+			"dsh-token-dashboard .tdb-msearch:focus-within{ border-color: var(--tdb-border-strong); background: var(--tdb-bg-cell-hover); }",
+			"dsh-token-dashboard .tdb-msearch input{",
+			"  all: unset; min-width: 0; width: 100%; font-size: 10.5px; color: var(--tdb-fg);",
+			"}",
+			"dsh-token-dashboard .tdb-msearch input::placeholder{ color: var(--tdb-fg-faint); }",
+			"dsh-token-dashboard .tdb-mfilter{",
+			"  flex: 0 0 112px; min-width: 0; height: 26px; padding: 3px 6px;",
+			"  background: var(--tdb-bg-cell); color: var(--tdb-fg); border: 1px solid var(--tdb-border);",
+			"  border-radius: var(--tdb-radius-sm); font-size: 10.5px; cursor: pointer;",
+			"}",
+			"dsh-token-dashboard .tdb-mfilter:hover{ background: var(--tdb-bg-cell-hover); }",
+			"dsh-token-dashboard .tdb-mfilter option{ background: var(--tdb-bg); color: var(--tdb-fg); }",
+			"dsh-token-dashboard .tdb-mcount{ flex: none; font-size: 9.5px; color: var(--tdb-fg-faint); white-space: nowrap; }",
+			"dsh-token-dashboard .tdb-mlist{ display: flex; flex-direction: column; gap: 5px; }",
+			"dsh-token-dashboard .tdb-mgroup{",
+			"  margin-top: 3px; border: 1px solid var(--tdb-border); border-radius: var(--tdb-radius-sm);",
+			"  background: color-mix(in srgb, var(--tdb-bg-cell) 55%, transparent); overflow: hidden;",
+			"}",
+			"dsh-token-dashboard .tdb-mgroup:first-child{ margin-top: 0; }",
+			"dsh-token-dashboard .tdb-mgroup > summary{",
+			"  display: flex; align-items: baseline; gap: 7px; min-width: 0; padding: 6px 8px;",
+			"  cursor: pointer; list-style: none; user-select: none; background: var(--tdb-bg-elev);",
+			"}",
+			"dsh-token-dashboard .tdb-mgroup > summary::-webkit-details-marker{ display: none; }",
+			"dsh-token-dashboard .tdb-mgroup > summary::before{",
+			"  content: ''; width: 11px; height: 11px; flex: none; margin-top: 1px;",
+			"  background: var(--tdb-fg-muted); -webkit-mask: " + ICON_DATA_URI(ICONS.chevron) + " center / contain no-repeat; mask: " + ICON_DATA_URI(ICONS.chevron) + " center / contain no-repeat;",
+			"  transition: transform .15s ease;",
+			"}",
+			"dsh-token-dashboard .tdb-mgroup[open] > summary::before{ transform: rotate(180deg); }",
+			"dsh-token-dashboard .tdb-mgroup > summary:hover{ background: var(--tdb-bg-cell-hover); }",
+			"dsh-token-dashboard .tdb-mg-name{",
+			"  font-family: var(--tdb-mono); font-size: 11.5px; font-weight: 700; color: var(--tdb-fg);",
+			"  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;",
+			"}",
+			"dsh-token-dashboard .tdb-mg-total{",
+			"  font-size: 9.5px; color: var(--tdb-fg-muted); flex: 1; min-width: 0;",
+			"  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;",
+			"}",
+			"dsh-token-dashboard .tdb-mg-pct{ font-family: var(--tdb-mono); font-size: 10.5px; color: var(--tdb-accent-in); white-space: nowrap; }",
+			"dsh-token-dashboard .tdb-mgroup-body{ display: flex; flex-direction: column; padding: 0 6px 5px; }",
 			"dsh-token-dashboard .tdb-mcard{",
-			"  background: var(--tdb-bg-cell); border: 1px solid var(--tdb-border); border-radius: var(--tdb-radius-sm);",
-			"  padding: 8px 10px 7px; display: flex; flex-direction: column; gap: 6px;",
+			"  display: flex; flex-direction: column; gap: 4px; min-width: 0; padding: 6px 2px 5px;",
+			"  border-top: 1px solid var(--tdb-border);",
 			"}",
-			"dsh-token-dashboard .tdb-mtop{ display: flex; align-items: baseline; gap: 8px; min-width: 0; }",
+			"dsh-token-dashboard .tdb-mgroup-body .tdb-mcard:first-child{ border-top: 0; }",
+			"dsh-token-dashboard .tdb-mtop{ display: flex; align-items: baseline; gap: 7px; min-width: 0; }",
 			"dsh-token-dashboard .tdb-mname{",
-			"  font-family: var(--tdb-mono); font-size: 12.5px; font-weight: 600; color: var(--tdb-fg);",
-			"  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;",
+			"  font-family: var(--tdb-mono); font-size: 11.5px; font-weight: 600; color: var(--tdb-fg);",
+			"  min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;",
 			"}",
-			"dsh-token-dashboard .tdb-mprov{",
-			"  font-size: 10px; color: var(--tdb-fg-faint); flex: 1; min-width: 0;",
-			"  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;",
-			"}",
-			"dsh-token-dashboard .tdb-mpct{ font-family: var(--tdb-mono); font-size: 12px; color: var(--tdb-accent-in); white-space: nowrap; }",
-			"dsh-token-dashboard .tdb-mgrid{ display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; }",
-			"dsh-token-dashboard .tdb-mgrid .tdb-cell{ padding: 6px 8px; }",
-			"dsh-token-dashboard .tdb-mgrid .tdb-cell b{ font-size: 13px; }",
-			"dsh-token-dashboard .tdb-mgrid .tdb-mtot{",
-			"  grid-column: 1 / -1; border-left-color: var(--tdb-accent-ctx);",
-			"  flex-direction: row; align-items: baseline; justify-content: space-between; gap: 8px;",
-			"}",
-			"dsh-token-dashboard .tdb-mgrid .tdb-mtot b{ font-size: 14px; color: var(--tdb-accent-ctx); }",
-			"dsh-token-dashboard .tdb-mgrid .tdb-mtot span{ font-size: 10px; }",
-			"dsh-token-dashboard .tdb-mbar{ height: 3px; background: var(--tdb-bg-chart); border-radius: 2px; overflow: hidden; }",
+			"dsh-token-dashboard .tdb-mtotal{ margin-left: auto; font-family: var(--tdb-mono); font-size: 11.5px; color: var(--tdb-accent-ctx); white-space: nowrap; }",
+			"dsh-token-dashboard .tdb-mpct{ font-family: var(--tdb-mono); font-size: 10.5px; color: var(--tdb-accent-in); white-space: nowrap; }",
+			"dsh-token-dashboard .tdb-mstats{ display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 4px; min-width: 0; }",
+			"dsh-token-dashboard .tdb-mstat{ display: flex; align-items: baseline; gap: 3px; min-width: 0; overflow: hidden; white-space: nowrap; }",
+			"dsh-token-dashboard .tdb-mstat i{ font-style: normal; font-size: 9px; color: var(--tdb-fg-muted); flex: none; }",
+			"dsh-token-dashboard .tdb-mstat b{ font-family: var(--tdb-mono); font-size: 10.5px; font-weight: 600; color: var(--tdb-fg); overflow: hidden; text-overflow: ellipsis; }",
+			"dsh-token-dashboard .tdb-ms-in i{ color: var(--tdb-accent-in); }",
+			"dsh-token-dashboard .tdb-ms-cr i{ color: var(--tdb-accent-cr); }",
+			"dsh-token-dashboard .tdb-ms-cw i{ color: var(--tdb-accent-cw); }",
+			"dsh-token-dashboard .tdb-ms-out i{ color: var(--tdb-accent-out); }",
+			"dsh-token-dashboard .tdb-ms-calls i{ color: var(--tdb-accent-calls); }",
+			"dsh-token-dashboard .tdb-mbar{ height: 2px; background: var(--tdb-bg-chart); border-radius: 2px; overflow: hidden; }",
 			"dsh-token-dashboard .tdb-mbar i{",
 			"  display: block; height: 100%; background: linear-gradient(90deg, var(--tdb-accent-in), var(--tdb-accent-out));",
 			"  border-radius: 2px;",
-			"}",
-			// 模型面板：按提供商分组头（组名 + 组内汇总）
-			"dsh-token-dashboard .tdb-mgroup{",
-			"  display: flex; align-items: baseline; gap: 8px; margin-top: 8px; padding: 3px 2px 0;",
-			"}",
-			"dsh-token-dashboard .tdb-mgroup:first-child{ margin-top: 0; }",
-			"dsh-token-dashboard .tdb-mg-name{",
-			"  font-family: var(--tdb-mono); font-size: 12px; font-weight: 700; color: var(--tdb-fg);",
-			"  white-space: nowrap;",
-			"}",
-			"dsh-token-dashboard .tdb-mg-total{",
-			"  font-size: 10px; color: var(--tdb-fg-muted); flex: 1; min-width: 0;",
-			"  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;",
-			"}",
-			"dsh-token-dashboard .tdb-mg-pct{",
-			"  font-family: var(--tdb-mono); font-size: 11px; color: var(--tdb-accent-in); white-space: nowrap;",
 			"}",
 			// DeepSeek 余额面板
 			"dsh-token-dashboard .tdb-ds-note{",
@@ -403,6 +433,20 @@ window.__ModuleLoader__.load({
 			"}",
 			"dsh-token-dashboard .tdb-ds-note.err{ color: var(--tdb-accent-err); border-color: var(--tdb-accent-err); }",
 			"dsh-token-dashboard .tdb-ds-note.ok{ color: var(--tdb-accent-ok); border-color: color-mix(in srgb, var(--tdb-accent-ok) 45%, transparent); }",
+			"dsh-token-dashboard .tdb-pane-deepseek .tdb-ds-note{",
+			"  padding: 6px 8px; line-height: 1.35; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;",
+			"}",
+			"dsh-token-dashboard .tdb-ds-balances, dsh-token-dashboard .tdb-ds-consumed{ display: grid; gap: 6px; }",
+			"dsh-token-dashboard .tdb-ds-balances{ grid-template-columns: repeat(3, minmax(0, 1fr)); }",
+			"dsh-token-dashboard .tdb-ds-consumed{ grid-template-columns: repeat(4, minmax(0, 1fr)); }",
+			"dsh-token-dashboard .tdb-ds-balances .tdb-cell, dsh-token-dashboard .tdb-ds-consumed .tdb-cell{",
+			"  min-width: 0; padding: 6px 8px; gap: 1px;",
+			"}",
+			"dsh-token-dashboard .tdb-ds-balances .tdb-cell b, dsh-token-dashboard .tdb-ds-consumed .tdb-cell b{ font-size: 13px; }",
+			"dsh-token-dashboard .tdb-ds-consumed .tdb-cell span{ font-size: 9px; }",
+			"dsh-token-dashboard .tdb-pane-deepseek .tdb-chart{ gap: 4px; padding: 7px 8px 6px; }",
+			"dsh-token-dashboard .tdb-pane-deepseek .tdb-clabel{ font-size: 9.5px; }",
+			"dsh-token-dashboard .tdb-pane-deepseek svg.tdb-svg{ height: 56px; }",
 			"dsh-token-dashboard .tdb-ds-meta{ font-size: 10.5px; color: var(--tdb-fg-faint); text-align: right; }",
 			"dsh-token-dashboard .tdb-mlist .tdb-empty{ padding: 22px 0; }",
 			"dsh-token-dashboard .tdb-selrow .tdb-select{",
@@ -657,23 +701,25 @@ window.__ModuleLoader__.load({
 				"      </div>",
 				"    </div>",
 				"    <div class=\"tdb-pane tdb-pane-model\" hidden=\"\">",
-				"      <div class=\"tdb-selrow\">",
-				"        <select class=\"tdb-select tdb-mfilter\" aria-label=\"筛选提供商\"></select>",
+				"      <div class=\"tdb-mcontrols\">",
+				"        <label class=\"tdb-msearch\" title=\"搜索模型或提供商\"><input class=\"tdb-msearch-input\" type=\"search\" placeholder=\"搜索模型或提供商\" aria-label=\"搜索模型或提供商\"></label>",
+				"        <select class=\"tdb-mfilter\" aria-label=\"筛选提供商\"></select>",
+				"        <span class=\"tdb-mcount\"></span>",
 				"      </div>",
 				"      <div class=\"tdb-mlist\"><div class=\"tdb-empty\">暂无模型数据</div></div>",
 				"    </div>",
 				"    <div class=\"tdb-pane tdb-pane-deepseek\" hidden=\"\">",
 				"      <div class=\"tdb-ds-note\"></div>",
-				"      <div class=\"tdb-grid\">",
+				"      <div class=\"tdb-ds-balances\">",
 				"        <div class=\"tdb-cell tdb-c-ctx\"><b class=\"tdb-ds-total\">—</b><span>总余额</span></div>",
 				"        <div class=\"tdb-cell tdb-c-cr\"><b class=\"tdb-ds-granted\">—</b><span>赠送余额</span></div>",
 				"        <div class=\"tdb-cell tdb-c-in\"><b class=\"tdb-ds-topped\">—</b><span>充值余额</span></div>",
 				"      </div>",
-				"      <div class=\"tdb-mgrid\">",
-				"        <div class=\"tdb-cell tdb-c-cr\"><b class=\"tdb-ds-c-h1\">—</b><span>近1小时余额消耗</span></div>",
-				"        <div class=\"tdb-cell tdb-c-in\"><b class=\"tdb-ds-c-d1\">—</b><span>近24小时余额消耗</span></div>",
-				"        <div class=\"tdb-cell tdb-c-out\"><b class=\"tdb-ds-c-d7\">—</b><span>近7天余额消耗</span></div>",
-				"        <div class=\"tdb-cell tdb-mtot\"><b class=\"tdb-ds-c-all\">—</b><span>自监控以来余额消耗</span></div>",
+				"      <div class=\"tdb-ds-consumed\">",
+				"        <div class=\"tdb-cell tdb-c-cr\" title=\"近1小时余额消耗\"><b class=\"tdb-ds-c-h1\">—</b><span>1小时</span></div>",
+				"        <div class=\"tdb-cell tdb-c-in\" title=\"近24小时余额消耗\"><b class=\"tdb-ds-c-d1\">—</b><span>24小时</span></div>",
+				"        <div class=\"tdb-cell tdb-c-out\" title=\"近7天余额消耗\"><b class=\"tdb-ds-c-d7\">—</b><span>7天</span></div>",
+				"        <div class=\"tdb-cell tdb-c-ctx\" title=\"自监控以来余额消耗\"><b class=\"tdb-ds-c-all\">—</b><span>累计</span></div>",
 				"      </div>",
 				"      <div class=\"tdb-chart\">",
 				"        <div class=\"tdb-clabel\"><span>余额走势</span><span class=\"tdb-ds-leg\"></span></div>",
@@ -735,8 +781,17 @@ window.__ModuleLoader__.load({
 			var tab = readStore("tab", "session");
 			if (tab !== "all" && tab !== "session" && tab !== "model" && tab !== "deepseek") tab = "session";
 			var TAB_ORDER = ["all", "session", "model", "deepseek"];
-			/** 模型面板的提供商筛选（"" = 全部提供商）。 */
+			/** 模型面板的提供商筛选（"" = 全部提供商）与文本搜索。 */
 			var mFilter = readStore("mfilter", "");
+			var mSearch = readStore("msearch", "");
+			var mGroupOpen = {};
+			try {
+				var rawGroupOpen = readStore("mgroups", "");
+				if (rawGroupOpen) {
+					var parsedGroupOpen = JSON.parse(rawGroupOpen);
+					if (parsedGroupOpen && typeof parsedGroupOpen === "object" && !Array.isArray(parsedGroupOpen)) mGroupOpen = parsedGroupOpen;
+				}
+			} catch { /* 展开状态损坏——使用默认状态 */ }
 			var tabBtns = root.querySelectorAll(".tdb-tab");
 			var paneAll = root.querySelector(".tdb-pane-all");
 			var paneSession = root.querySelector(".tdb-pane-session");
@@ -744,6 +799,8 @@ window.__ModuleLoader__.load({
 			var paneDeepseek = root.querySelector(".tdb-pane-deepseek");
 			var mlistEl = root.querySelector(".tdb-mlist");
 			var mFilterEl = root.querySelector(".tdb-mfilter");
+			var mSearchEl = root.querySelector(".tdb-msearch-input");
+			var mCountEl = root.querySelector(".tdb-mcount");
 			var dsNote = root.querySelector(".tdb-ds-note");
 			var dsMeta = root.querySelector(".tdb-ds-meta");
 			var dsEls = {};
@@ -1037,13 +1094,12 @@ window.__ModuleLoader__.load({
 				});
 			}
 
-			/** 渲染模型面板：按提供商分组，每组一个标题 + 组内汇总，
-			 *  组内每模型一张卡片，展示窗口内 token 明细、占总体消耗的
-			 *  比例以及缓存命中率。顶部的下拉可按提供商筛选。 */
+			/** 渲染模型面板：提供商可折叠，模型支持文本搜索；每个模型用一行
+			 *  摘要承载总量，第二行用紧凑指标承载 token 明细。 */
 			function renderPaneModel() {
 				var models = data && Array.isArray(data.models) ? data.models : [];
-				// 重建筛选下拉的选项（保留当前选择；新的提供商出现时自动补充）。
 				var filter = mFilter;
+				var query = String(mSearch || "").trim().toLowerCase();
 				var provs = [];
 				for (var fi = 0; fi < models.length; fi++) {
 					var fp = (typeof models[fi].provider === "string" && models[fi].provider !== "" && models[fi].provider !== "未知")
@@ -1051,76 +1107,111 @@ window.__ModuleLoader__.load({
 						: "未知提供商";
 					if (provs.indexOf(fp) === -1) provs.push(fp);
 				}
+				if (filter !== "" && provs.indexOf(filter) === -1) filter = "";
+				mFilter = filter;
 				var opts = '<option value="">全部提供商</option>';
 				for (var pi = 0; pi < provs.length; pi++) {
 					opts += '<option value="' + esc(provs[pi]) + '"' + (filter === provs[pi] ? ' selected' : '') + '>' + esc(provs[pi]) + '</option>';
 				}
 				mFilterEl.innerHTML = opts;
-				if (filter !== "" && provs.indexOf(filter) === -1) filter = "";
-				mFilter = filter;
+				mSearchEl.value = mSearch;
 				if (models.length === 0) {
+					mCountEl.textContent = "";
 					mlistEl.innerHTML = '<div class="tdb-empty">暂无模型数据</div>';
 					return;
 				}
-				// 按提供商分组，保持首次出现顺序；组内保持原顺序（按占比降序）。
-				var groups = [];
-				var gIndex = {};
+
+				// 先按提供商和搜索词筛选，再生成分组；这样搜索结果仍保持层次结构。
+				var visible = [];
 				for (var i = 0; i < models.length; i++) {
-					var m = models[i];
-					var p = (typeof m.provider === "string" && m.provider !== "" && m.provider !== "未知")
-						? m.provider
+					var model = models[i];
+					var provider = (typeof model.provider === "string" && model.provider !== "" && model.provider !== "未知")
+						? model.provider
 						: "未知提供商";
-					if (filter !== "" && p !== filter) continue; // 筛选：只保留选中的提供商
-					var gi = gIndex[p];
+					var modelName = typeof model.model === "string" && model.model !== "" ? model.model : "未知";
+					var haystack = (provider + " " + modelName).toLowerCase();
+					if (filter !== "" && provider !== filter) continue;
+					if (query !== "" && haystack.indexOf(query) === -1) continue;
+					visible.push({ model: model, provider: provider, name: modelName });
+				}
+				mCountEl.textContent = visible.length === models.length
+					? models.length + " 个模型"
+					: visible.length + " / " + models.length + " 个模型";
+				if (visible.length === 0) {
+					mlistEl.innerHTML = '<div class="tdb-empty">没有匹配的模型</div>';
+					return;
+				}
+
+				var groups = [];
+				var gIndex = Object.create(null);
+				for (var vi = 0; vi < visible.length; vi++) {
+					var item = visible[vi];
+					var gi = gIndex[item.provider];
 					if (gi === undefined) {
 						gi = groups.length;
-						gIndex[p] = gi;
-						groups.push({ provider: p, models: [] });
+						gIndex[item.provider] = gi;
+						groups.push({ provider: item.provider, models: [] });
 					}
-					groups[gi].models.push(m);
+					groups[gi].models.push(item);
 				}
+
 				var out = [];
 				for (var g = 0; g < groups.length; g++) {
 					var grp = groups[g];
 					var gTotal = 0;
 					var gShare = 0;
 					for (var j = 0; j < grp.models.length; j++) {
-						var gj = grp.models[j].totals || {};
+						var gj = grp.models[j].model.totals || {};
 						gTotal += overall(gj);
-						gShare += typeof grp.models[j].sharePct === "number" ? grp.models[j].sharePct : 0;
+						gShare += typeof grp.models[j].model.sharePct === "number" ? grp.models[j].model.sharePct : 0;
 					}
+					var savedOpen = Object.prototype.hasOwnProperty.call(mGroupOpen, grp.provider);
+					var groupOpen = savedOpen ? mGroupOpen[grp.provider] !== false : (groups.length === 1 || g === 0);
 					out.push(
-						'<div class="tdb-mgroup">' +
+						'<details class="tdb-mgroup" data-provider="' + esc(grp.provider) + '"' + (groupOpen ? ' open' : '') + '>' +
+						'<summary aria-label="展开或收起 ' + esc(grp.provider) + '">' +
 						'<span class="tdb-mg-name" title="提供商">' + esc(grp.provider) + '</span>' +
 						'<span class="tdb-mg-total">' + grp.models.length + ' 个模型 · ' + fmt(gTotal) + ' tok</span>' +
 						'<span class="tdb-mg-pct">' + gShare.toFixed(1) + '%</span>' +
-						'</div>'
+						'</summary><div class="tdb-mgroup-body">'
 					);
 					for (var k = 0; k < grp.models.length; k++) {
-						var mm = grp.models[k];
+						var entry = grp.models[k];
+						var mm = entry.model;
 						var t = mm.totals || {};
 						var total = overall(t);
 						var share = typeof mm.sharePct === "number" ? mm.sharePct : 0;
 						var hit = typeof mm.hitPct === "number" ? mm.hitPct : 0;
-						var hitTxt = hit > 0 ? "命中 " + hit.toFixed(1) + "%" : "命中率 —";
+						var hitTxt = hit > 0 ? "缓存命中 " + hit.toFixed(1) + "%" : "缓存命中率 —";
 						var mCalls = typeof t.calls === "number" ? t.calls : null;
+						var cacheWrite = data.hasCacheWrite === false ? "—" : fmt(t.cacheWrite);
+						var cacheWriteTip = data.hasCacheWrite === false ? "数据源未上报缓存写入" : "缓存写入";
 						out.push(
 							'<div class="tdb-mcard">' +
-							'<div class="tdb-mtop"><b class="tdb-mname" title="提供商: ' + esc(mm.provider || "未知") + '">' + esc(mm.model || "未知") + '</b>' +
-							'<span class="tdb-mprov">' + esc(grp.provider) + '</span><span class="tdb-mpct">' + share.toFixed(1) + '%</span></div>' +
-							'<div class="tdb-mgrid">' +
-							'<div class="tdb-cell tdb-c-in"><b>' + fmt(t.uncached) + '</b><span><i class="tdb-i"></i>输入 · uncached</span></div>' +
-							'<div class="tdb-cell tdb-c-cr"><b>' + fmt(t.cacheRead) + '</b><span><i class="tdb-i"></i>缓存读取</span></div>' +
-							'<div class="tdb-cell tdb-c-out"><b>' + fmt(t.output) + '</b><span><i class="tdb-i"></i>输出</span></div>' +
-							'<div class="tdb-cell tdb-c-calls" title="' + (mCalls === null ? '数据源未上报调用次数' : '当前时间范围内该模型的 API 调用次数') + '"><b>' + (mCalls === null ? "—" : String(mCalls)) + '</b><span><i class="tdb-i"></i>API 调用次数</span></div>' +
-							'<div class="tdb-cell tdb-mtot"><b>' + fmt(total) + '</b><span>总消耗(整体) · ' + hitTxt + '</span></div>' +
+							'<div class="tdb-mtop"><b class="tdb-mname" title="' + esc(entry.provider + " / " + entry.name) + '">' + esc(entry.name) + '</b>' +
+							'<span class="tdb-mtotal" title="总消耗（输入 + 缓存读写 + 输出）">' + fmt(total) + ' tok</span>' +
+							'<span class="tdb-mpct">' + share.toFixed(1) + '%</span></div>' +
+							'<div class="tdb-mstats">' +
+							'<span class="tdb-mstat tdb-ms-in" title="输入 · uncached"><i>入</i><b>' + fmt(t.uncached) + '</b></span>' +
+							'<span class="tdb-mstat tdb-ms-cr" title="缓存读取"><i>读</i><b>' + fmt(t.cacheRead) + '</b></span>' +
+							'<span class="tdb-mstat tdb-ms-cw" title="' + cacheWriteTip + '"><i>写</i><b>' + cacheWrite + '</b></span>' +
+							'<span class="tdb-mstat tdb-ms-out" title="输出"><i>出</i><b>' + fmt(t.output) + '</b></span>' +
+							'<span class="tdb-mstat tdb-ms-calls" title="' + (mCalls === null ? '数据源未上报调用次数' : '当前时间范围内该模型的 API 调用次数') + '"><i>调</i><b>' + (mCalls === null ? "—" : String(mCalls)) + '</b></span>' +
 							'</div>' +
-							'<div class="tdb-mbar"><i style="width:' + Math.min(100, Math.max(0.5, share)) + '%"></i></div>' +
+							'<div class="tdb-mbar" title="' + esc("占窗口总消耗 " + share.toFixed(1) + "% · " + hitTxt) + '"><i style="width:' + Math.min(100, Math.max(0.5, share)) + '%"></i></div>' +
 							'</div>'
 						);
 					}
+					out.push('</div></details>');
 				}
 				mlistEl.innerHTML = out.join("");
+				var groupEls = mlistEl.querySelectorAll(".tdb-mgroup");
+				for (var ge = 0; ge < groupEls.length; ge++) {
+					groupEls[ge].addEventListener("toggle", function () {
+						mGroupOpen[this.getAttribute("data-provider")] = this.open;
+						writeStore("mgroups", JSON.stringify(mGroupOpen));
+					});
+				}
 			}
 
 			/** 渲染 DeepSeek 面板：官方账户余额（未配置密钥或 fetch 失败时
@@ -1156,17 +1247,22 @@ window.__ModuleLoader__.load({
 				}
 				if (!b) {
 					dsNote.textContent = "余额信息暂不可用";
+					dsNote.title = "余额信息暂不可用";
 					dsNote.className = "tdb-ds-note";
 				} else if (!b.configured) {
-					dsNote.textContent = "未配置 DeepSeek API Key：在插件配置中设置 deepseekApiKey，或设置环境变量 DEEPSEEK_API_KEY（密钥只存在服务端，不会下发到页面）。";
+					dsNote.textContent = "未配置 DeepSeek API Key";
+					dsNote.title = "请在 DSH 凭据中配置 DEEPSEEK_API_KEY，或设置环境变量 DEEPSEEK_API_KEY。密钥只存在服务端，不会下发到页面。";
 					dsNote.className = "tdb-ds-note err";
 				} else if (!b.ok) {
-					dsNote.textContent = "获取余额失败：" + (b.error || "未知错误") + "（稍后自动重试，已有历史样本保留）";
+					var balanceError = b.error || "未知错误";
+					dsNote.textContent = "获取余额失败：" + balanceError;
+					dsNote.title = "获取余额失败：" + balanceError + "（稍后自动重试，已有历史样本保留）";
 					dsNote.className = "tdb-ds-note err";
 				} else {
-					var avail = b.is_available === false ? "账户不可用（is_available=false）" : "账户正常";
+					var avail = b.is_available === false ? "账户不可用" : "账户正常";
 					var cur = b.infos.length > 0 ? b.infos.map(function (i) { return String(i.currency || "?"); }).join("/") : "—";
-					dsNote.textContent = "已连接 DeepSeek 官方 API · 币种 " + cur + " · " + avail + " · 消耗为余额下降量累计（充值/赠送不计入），以官方账单为准";
+					dsNote.textContent = "已连接 · 币种 " + cur + " · " + avail;
+					dsNote.title = "已连接 DeepSeek 官方 API · 币种 " + cur + " · " + avail + " · 消耗为余额下降量累计（充值/赠送不计入），以官方账单为准";
 					dsNote.className = "tdb-ds-note ok";
 				}
 				// 根据历史样本绘制的余额随时间变化曲线。
@@ -1663,6 +1759,11 @@ window.__ModuleLoader__.load({
 			mFilterEl.addEventListener("change", function () {
 				mFilter = mFilterEl.value; // "" = 全部提供商
 				writeStore("mfilter", mFilter);
+				render();
+			});
+			mSearchEl.addEventListener("input", function () {
+				mSearch = mSearchEl.value;
+				writeStore("msearch", mSearch);
 				render();
 			});
 			for (var tb = 0; tb < tabBtns.length; tb++) {

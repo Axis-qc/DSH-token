@@ -736,7 +736,7 @@ function aggregateModels(sessions, start, endMs) {
 //#endregion
 
 //#region DeepSeek 官方账户余额——配置了 key 时从官方 API 获取
-//       （config `deepseekApiKey` 或环境变量 `DEEPSEEK_API_KEY`）。
+//       （key 直接复用 DSH 的 .credentials.yaml 的 DEEPSEEK_API_KEY，或环境变量兜底）。
 //       官方文档：https://api-docs.deepseek.com/api/get-user-balance/
 const DEEPSEEK_BALANCE_URL = "https://api.deepseek.com/user/balance";
 // 官方 DeepSeek 账户余额的拉取间隔固定为 30 分钟，对齐本地时间
@@ -924,45 +924,76 @@ export function apply(ctx, config = {}) {
 	const seriesSize = clampInt(config.seriesSize, 1, 100000, DEFAULT_SERIES_SIZE);
 	const backfillOnStart = config.backfillOnStart !== false;
 	const scanRoot = resolveScanRoot(config);
-	// 官方 DeepSeek 账户余额——key 来自 config 或环境变量；key 本身
-	// 绝不出现在 payload 中，只有 `configured` 与拉取到的数字。
+	// 官方 DeepSeek 账户余额——key 直接复用 DSH 集中凭据存储
+	// （.credentials.yaml 的 refs.DEEPSEEK_API_KEY）或环境变量；
+	// key 本身绝不出现在 payload 中，只有 `configured` 与拉取到的数字。
 	// 每次成功拉取都会向 `history` 追加一个采样，让组件能展示
 	// 过去一小时/一天/一周消耗了多少余额（这是我们仅有的真实
 	// 资金信号——token 日志带数量，但不带价格）。
-	const deepseekApiKey =
-		(typeof config.deepseekApiKey === "string" && config.deepseekApiKey.trim() !== "" ? config.deepseekApiKey.trim() : "") ||
-		(typeof process !== "undefined" && process.env && typeof process.env.DEEPSEEK_API_KEY === "string" ? process.env.DEEPSEEK_API_KEY.trim() : "");
+	// 无需在插件配置里再硬编码一份。
 	const balanceFile =
 		typeof config.balanceFile === "string" && config.balanceFile.trim() !== "" ? config.balanceFile.trim() : defaultBalanceFile();
+	// 每 30 分钟采样一次；100 万条约可覆盖 57 年，保留更长的本地历史。
+	const BALANCE_HISTORY_MAX = 1_000_000;
+	const initialBalanceHistory = loadBalanceHistory(balanceFile, BALANCE_HISTORY_MAX);
 	let balance = {
-		configured: deepseekApiKey !== "",
+		configured: false,
 		ok: false,
-		error: deepseekApiKey === "" ? "未配置 DeepSeek API Key" : null,
+		error: "未配置 DeepSeek API Key",
 		fetchedAt: null,
 		is_available: null,
 		infos: [],
 		/** 有序的近期采样：[{ t, total, granted, topped }]，最早的在前。 */
-		history: [],
+		history: initialBalanceHistory,
 		/** 1h / 1d / 7d / all 各窗口内的余额下降量累计（逐段累计，充值段记 0）。 */
-		consumed: { h1: null, d1: null, d7: null, all: null },
+		consumed: computeConsumed(initialBalanceHistory, Date.now()),
 	};
-	const BALANCE_HISTORY_MAX = 4000;
-	// 跨重启持久化：启动时从磁盘加载既有采样，这样
-	// 各窗口与曲线都能保留历史，而不是清零。
-	if (deepseekApiKey !== "") {
-		balance.history = loadBalanceHistory(balanceFile, BALANCE_HISTORY_MAX);
-		balance.consumed = computeConsumed(balance.history, Date.now());
+	// 直接复用 DSH 集中凭据存储：读取 $DSH_HOME/.credentials.yaml 的
+	// refs.DEEPSEEK_API_KEY（与 dsh-llm-deepseek 同源的 key 来源），
+	// 环境变量 DEEPSEEK_API_KEY 作为兜底；不依赖 ctx.credentials seam，
+	// 也不再接受 config.deepseekApiKey 单独配置，避免 key 在多处维护。
+	function readCredentialRefFromFile(refName) {
+		try {
+			const file = join(resolveHome(), ".credentials.yaml");
+			const text = readFileSync(file, { encoding: "utf8" });
+			// 截取顶层 refs: 段（到下一个无缩进的顶层键或文件结束），在其内匹配 "KEY: value"。
+			const refsMatch = /\nrefs:\n([\s\S]*?)(?=\n[A-Za-z0-9_-]+:|\s*$)/.exec("\n" + text);
+			const section = refsMatch ? refsMatch[1] : "";
+			const re = new RegExp("^\\s*" + refName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "\\s*:\\s*(.*)$", "m");
+			const line = re.exec(section);
+			if (!line) return "";
+			let v = line[1].trim();
+			// 去掉单/双引号包裹（若存在），并处理行尾注释。
+			if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) v = v.slice(1, -1);
+			return v.trim();
+		} catch {
+			return "";
+		}
+	}
+	function resolveBalanceApiKey() {
+		const fromFile = readCredentialRefFromFile("DEEPSEEK_API_KEY");
+		if (fromFile !== "") return fromFile;
+		if (typeof process !== "undefined" && process.env && typeof process.env.DEEPSEEK_API_KEY === "string") return process.env.DEEPSEEK_API_KEY.trim();
+		return "";
 	}
 	async function refreshBalance() {
+		const deepseekApiKey = resolveBalanceApiKey();
 		if (deepseekApiKey === "") {
-			balance = { ...balance, configured: false, ok: false, error: "未配置 DeepSeek API Key", fetchedAt: null, is_available: null, infos: [], history: [], consumed: { h1: null, d1: null, d7: null, all: null } };
+			// key 暂时不可用时仍保留磁盘/内存里的历史，避免余额配置
+			// 短暂变化或凭据读取失败导致历史曲线和消耗归零。
+			balance = { ...balance, configured: false, ok: false, error: "未配置 DeepSeek API Key", fetchedAt: null, is_available: null, infos: [] };
+			balance.consumed = computeConsumed(balance.history, Date.now());
 			return;
 		}
 		try {
 			const parsed = await fetchDeepseekBalance(deepseekApiKey);
 			const now = Date.now();
 			const cur = parsed.infos.length > 0 ? parsed.infos[0] : null;
-			const hist = balance.history.slice();
+			// 进程启动后历史文件可能才被其他实例/首次采样创建；每次成功
+			// 采样前合并磁盘与内存，避免内存中的空数组遮蔽已有持久化历史。
+			const memoryHistory = Array.isArray(balance.history) ? balance.history : [];
+			const diskHistory = loadBalanceHistory(balanceFile, BALANCE_HISTORY_MAX);
+			const hist = normalizeBalanceHistory(diskHistory.concat(memoryHistory), BALANCE_HISTORY_MAX);
 			if (cur && typeof cur.total === "number" && Number.isFinite(cur.total)) {
 				hist.push({ t: now, total: cur.total, granted: cur.granted, topped: cur.topped });
 				if (hist.length > BALANCE_HISTORY_MAX) hist.splice(0, hist.length - BALANCE_HISTORY_MAX);
@@ -1145,12 +1176,19 @@ export function apply(ctx, config = {}) {
 	// DeepSeek 余额：启动后立即拉取一次，之后用 setTimeout 链对齐到
 	// 本地时间的整点与半点（:00 / :30）拉取，每半小时一次，
 	// 采样时刻始终整齐（不再从插件启动时刻起算）。
-	if (deepseekApiKey !== "") {
-		setImmediate(() => {
+	// 历史已在上方初始化时从磁盘加载；启动时取到 key 后立即拉取一次余额，
+	// 取不到 key 则不启动余额定时器，但仍保留已加载的历史数据。
+	// （resolveBalanceApiKey 是纯同步读文件，无需 async 包装。）
+	setImmediate(() => {
+		try {
+			const key = resolveBalanceApiKey();
+			if (key === "") return;
 			refreshBalance().catch(() => {});
 			scheduleBalanceTick();
-		});
-	}
+		} catch {
+			/* 启动期解析失败不阻塞插件其余功能 */
+		}
+	});
 	let balanceTimer = null;
 	function scheduleBalanceTick() {
 		const now = new Date();

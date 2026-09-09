@@ -81,8 +81,9 @@ function upsertPatchRow(profileDir) {
 	}
 	const block = existing.slice(start, end);
 	// 如果该配置块已包含基础配置键，就原样保留 —— 用户可能额外加了其他的
-	// 键（例如 deepseekApiKey / balanceRefreshMs / balanceFile），用模板整体
-	// 重写会把它们静默抹掉。
+// 键（例如 balanceFile），用模板整体重写会把它们静默抹掉。
+// 注意：DeepSeek 余额 key 直接复用 DSH 的 .credentials.yaml 的
+// DEEPSEEK_API_KEY（插件自行读取该文件），此处不再配置 deepseekApiKey。
 	if (block.includes("apiPath:") && block.includes("seriesSize:")) {
 		return { changed: false, mode: "kept (user config preserved)" };
 	}
