@@ -124,6 +124,20 @@ export interface TokenDashboardPayload {
   series: TokenDashboardHourSample[];
   /** 窗口内的每模型消耗，按消耗降序排列。 */
   models: TokenDashboardModel[];
+  /** 汇总标签页用：累计 / 最近一月(d30) / 最近一周(d7) / 最近一日(d1)
+   *  四个滚动窗口的总量（随当前时刻滚动，独立于所选 range）。 */
+  windowTotals: {
+    all: TokenDashboardTotals;
+    d30: TokenDashboardTotals;
+    d7: TokenDashboardTotals;
+    d1: TokenDashboardTotals;
+  };
+  /** 汇总页堆叠柱状图用：与 `series` 同时间网格的每模型时段序列。
+   *  `key` 为 "provider|model"，`series` 的时间戳与全局 `series` 一一对应。 */
+  modelSeries: Array<{
+    key: string;
+    series: Array<{ t: number; in: number; cr: number; cw: number; out: number; calls: number }>;
+  }>;
   /** DeepSeek 官方账户余额，以及按余额下降推算的消耗。 */
   balance: TokenDashboardBalance;
   sessions: TokenDashboardSession[];

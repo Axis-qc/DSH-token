@@ -30,7 +30,9 @@ import { join } from "node:path";
 import { homedir } from "node:os";
 import { readFileSync, writeFileSync, renameSync, readdirSync, statSync } from "node:fs";
 import { zstdDecompressSync } from "node:zlib";
-import { decodeStorageRecord } from "@deepseek-ai/dsh-session";
+// 0.1.5 适配：dsh-session 已移除 decodeStorageRecord。会话日志改为在
+// readHeaderAndEvents 中逐行解析（header 行 type:"session" + 事件行），
+// 事件对象即 foldEvent 期望的 {type,data,time,...}，无需再解码。
 import "@deepseek-ai/cordis";
 
 export const name = "dsh-token-dashboard";
@@ -416,6 +418,10 @@ function readHeaderAndEvents(filePath, logger) {
 		const f = frames[i];
 		try {
 			const text = zstdDecompressSync(buffer.subarray(f.start, f.end)).toString("utf8");
+			// 0.1.5 会话日志格式：首行为会话头（type:"session"），其余每行是一条
+			// 事件（assistant/message、user/message、turn/end、step/end、
+			// request/context 等）。dsh-session@0.1.5 已移除 decodeStorageRecord，
+			// 这里直接逐行解析；每行即 foldEvent 期望的 {type,data,time,...} 事件对象。
 			for (const line of text.split("\n")) {
 				if (line.length === 0) continue;
 				let parsed;
@@ -424,16 +430,14 @@ function readHeaderAndEvents(filePath, logger) {
 				} catch {
 					continue;
 				}
-				const events = decodeStorageRecord(parsed);
-				for (const ev of events) {
-					if (ev && typeof ev === "object" && ev.type === "session" && typeof ev.id === "string") {
-						headerId = ev.id;
-						headerCwd = typeof ev.cwd === "string" ? ev.cwd : undefined;
-						headerPreset = typeof ev.agentPreset === "string" ? ev.agentPreset : undefined;
-						headerCreatedAt = typeof ev.createdAt === "number" ? ev.createdAt : undefined;
-					} else if (ev && typeof ev === "object") {
-						decoded.push(ev);
-					}
+				if (!parsed || typeof parsed !== "object") continue;
+				if (parsed.type === "session" && typeof parsed.id === "string") {
+					headerId = parsed.id;
+					headerCwd = typeof parsed.cwd === "string" ? parsed.cwd : undefined;
+					headerPreset = typeof parsed.agentPreset === "string" ? parsed.agentPreset : undefined;
+					headerCreatedAt = typeof parsed.createdAt === "number" ? parsed.createdAt : undefined;
+				} else {
+					decoded.push(parsed);
 				}
 			}
 		} catch (error) {
@@ -507,7 +511,18 @@ function backfillAll(sessions, root, seriesSize, logger) {
 		}
 		for (const sess of sessionDirs) {
 			if (!sess.isDirectory()) continue;
-			const file = join(projectPath, sess.name, "session.jsonl.zstd");
+			const sessDir = join(projectPath, sess.name);
+			// DSH 0.1.5 起会话日志文件名变为 session.v3.jsonl.zstd；旧版为
+			// session.jsonl.zstd。优先采用 v3（新版），回退旧名兼容历史会话。
+			let entries;
+			try { entries = readdirSync(sessDir, { withFileTypes: true }); }
+			catch { stats.files += 1; continue; }
+			const names = entries
+				.filter((e) => e.isFile() && /^session.*\.jsonl\.zstd$/.test(e.name))
+				.map((e) => e.name)
+				.sort((a, b) => (b.includes("v3") ? 1 : 0) - (a.includes("v3") ? 1 : 0));
+			if (names.length === 0) { stats.files += 1; continue; }
+			const file = join(sessDir, names[0]);
 			stats.files += 1;
 			const r = backfillOne(sessions, file, seriesSize, logger);
 			if (r.errored) stats.errors += 1;
@@ -667,7 +682,56 @@ function aggregateWindow(sessions, rangeMs) {
 			hitPct: billed > 0 ? Math.round((hb.cr / billed) * 100) / 100 : 0,
 		};
 	});
-	return { start, end: now, totals, series, sessionTotals, sessionSeries };
+	return { start, end: now, totals, series, mode, sessionTotals, sessionSeries };
+}
+
+/**
+ * 把窗口内每个模型的消耗折叠成与全局序列同网格的每时段序列
+ * （供汇总页的按模型堆叠柱状图使用）：时段宽度取自窗口的桶粒度
+ * （1h → 分钟、30d/全部 → 天、其余 → 小时），网格与全局 series
+ * 的 t 值完全一致，因此每段柱可直接与全局柱对齐。
+ * @param {Map<string, ReturnType<typeof newSessionState>>} sessions
+ * @param {number} start - 窗口起点（ms 时间戳）。
+ * @param {number} endMs - 窗口终点（ms 时间戳，通常为当前时刻）。
+ * @param {"hour" | "minute" | "day"} mode - 桶粒度（与 aggregateWindow 的 mode 一致）。
+ * @returns {Array<{ key: string, series: Array<{ t: number, in: number, cr: number, cw: number, out: number, calls: number }> }>}
+ *   按 key（provider|model）排列；只含有消耗的模型。
+ */
+function aggregateModelWindowSeries(sessions, start, endMs, mode) {
+	const slotMs = mode === "minute" ? MINUTE_MS : mode === "day" ? DAY_MS : HOUR_MS;
+	const startSlot = Math.floor(start / slotMs) * slotMs;
+	const endSlot = Math.floor(endMs / slotMs) * slotMs;
+	const slotCount = Math.floor((endSlot - startSlot) / slotMs) + 1;
+	const indexOfSlot = new Map();
+	for (let i = 0; i < slotCount; i++) indexOfSlot.set(startSlot + i * slotMs, i);
+	/** mk → Array<slot 桶> */
+	const perModel = new Map();
+	for (const state of sessions.values()) {
+		for (const [mk, bins] of state.modelHourBins) {
+			for (const [hk, b] of bins) {
+				// 末槽为不完整槽：窗口终点落在槽中间时，末槽仍延伸到
+				// endSlot + slotMs（与 sliceSession 的聚合语义一致）。
+				if (hk < startSlot || hk >= endSlot + slotMs) continue;
+				// 把小时/分钟桶对齐到窗口网格槽位（mode=day 时小时槽折叠进天槽）。
+				const slot = Math.floor(hk / slotMs) * slotMs;
+				const idx = indexOfSlot.get(slot);
+				if (idx === undefined) continue;
+				let arr = perModel.get(mk);
+				if (!arr) {
+					arr = [];
+					for (let i = 0; i < slotCount; i++) arr.push({ t: startSlot + i * slotMs, in: 0, cr: 0, cw: 0, out: 0, calls: 0 });
+					perModel.set(mk, arr);
+				}
+				const slotAgg = arr[idx];
+				slotAgg.in += b.in;
+				slotAgg.cr += b.cr;
+				slotAgg.cw += b.cw;
+				slotAgg.out += b.out;
+				slotAgg.calls += b.calls || 0;
+			}
+		}
+	}
+	return [...perModel.entries()].map(([key, series]) => ({ key, series }));
 }
 
 /**
@@ -732,6 +796,40 @@ function aggregateModels(sessions, start, endMs) {
 			};
 		})
 		.sort((a, b) => overallOf(b) - overallOf(a));
+}
+
+/**
+ * 单遍扫描所有会话的小时桶，累计「累计 / 最近一月 / 最近一周 / 最近一日」
+ * 四个滚动窗口的总量（API 整体消耗口径，含调用次数），供「汇总」标签页
+ * 一次展示跨窗口的消耗对比。窗口随当前时刻滚动（now - 30d 等），
+ * 空历史时全为 0。
+ * @param {Map<string, ReturnType<typeof newSessionState>>} sessions
+ * @returns {{ all: { uncached: number, cacheRead: number, cacheWrite: number, output: number, calls: number }, d30: …, d7: …, d1: … }}
+ */
+function aggregateWindowTotals(sessions) {
+	const now = Date.now();
+	const cutoffs = [
+		["all", -Infinity],
+		["d30", now - 30 * DAY_MS],
+		["d7", now - 7 * DAY_MS],
+		["d1", now - DAY_MS],
+	];
+	const out = {};
+	for (const [key] of cutoffs) out[key] = { uncached: 0, cacheRead: 0, cacheWrite: 0, output: 0, calls: 0 };
+	for (const state of sessions.values()) {
+		for (const [hk, b] of state.hourBins) {
+			for (const [key, cutoff] of cutoffs) {
+				if (hk < cutoff) continue;
+				const t = out[key];
+				t.uncached += b.in;
+				t.cacheRead += b.cr;
+				t.cacheWrite += b.cw;
+				t.output += b.out;
+				t.calls += b.calls || 0;
+			}
+		}
+	}
+	return out;
 }
 //#endregion
 
@@ -1098,6 +1196,11 @@ export function apply(ctx, config = {}) {
 			// 已移除货币估算：价格会变动且无法查询，
 			// 所以金额只会是过时的猜测）。
 			models: aggregateModels(sessions, agg.start, agg.end),
+			// 「汇总」标签页用：累计/最近一月/最近一周/最近一日
+			// 四个滚动窗口的总量（独立于所选 range，始终返回完整对比）。
+			windowTotals: aggregateWindowTotals(sessions),
+			// 汇总页堆叠柱状图用：与 series 同网格的每模型时段序列。
+			modelSeries: aggregateModelWindowSeries(sessions, agg.start, agg.end, agg.mode),
 			// 官方 DeepSeek 账户余额 + 按余额下降计算的消耗。
 			balance,
 			sessions: list,
@@ -1226,7 +1329,9 @@ export const _internal = {
 	rangeToMs,
 	sliceSession,
 	aggregateWindow,
+	aggregateWindowTotals,
 	aggregateModels,
+	aggregateModelWindowSeries,
 	fetchDeepseekBalance,
 	parseBalanceJson,
 	normalizeBalanceHistory,

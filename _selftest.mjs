@@ -19,6 +19,13 @@ import { homedir } from "node:os";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const here = (name) => pathToFileURL(join(HERE, name)).href;
+// 隔离 DSH_HOME：第 2 段的 API 路由会通过 resolveHome() 读取真实
+// $DSH_HOME 下的余额历史文件，导致「history 应为空」断言在装有
+// 真实余额样本的机器上误报失败。自检必须从干净状态开始，这里指向
+// 临时目录；第 3 段回填测试用的是硬编码家目录路径，不受影响。
+const SELFTEST_HOME = join(HERE, ".selftest-home");
+mkdirSync(SELFTEST_HOME, { recursive: true });
+process.env.DSH_HOME = SELFTEST_HOME;
 let failures = 0;
 const ok = (label) => console.log(`  ok  ${label}`);
 const bad = (label, err) => {
@@ -182,6 +189,27 @@ console.log("[2] server half");
 		assert.equal(body.models[1].hitPct, 27, "model-1 hit rate 1350/5000 = 27%");
 		assert.equal(body.models[1].sharePct, 44.98, "model-1 overall 6050/13450 = 44.98%");
 		assert.equal(body.models[0].provider, "demo-provider", "provider carried through");
+		// Window totals (累计/1月/1周/1日) for the summary pane: every fixture
+		// event lands within the current hour, so all four windows must agree
+		// with the global totals.
+		assert.ok(body.windowTotals, "payload exposes windowTotals");
+		assert.deepEqual(body.windowTotals.all, { uncached: 6500, cacheRead: 3550, cacheWrite: 850, output: 2550, calls: 4 }, "windowTotals.all matches global totals");
+		assert.deepEqual(body.windowTotals.d30, body.windowTotals.all, "windowTotals.d30 = all (fixture in last hour)");
+		assert.deepEqual(body.windowTotals.d7, body.windowTotals.all, "windowTotals.d7 = all (fixture in last hour)");
+		assert.deepEqual(body.windowTotals.d1, body.windowTotals.all, "windowTotals.d1 = all (fixture in last hour)");
+		// Per-model window series for the stacked bar chart: same grid as the
+		// global series; summing every model's slots must reconcile with the
+		// global series slots.
+		assert.ok(Array.isArray(body.modelSeries) && body.modelSeries.length === 2, "payload exposes one series per model");
+		const msSum = {};
+		for (const ms of body.modelSeries) {
+			for (const p of ms.series) {
+				msSum[p.t] = (msSum[p.t] || 0) + p.in + p.cr + p.cw + p.out;
+			}
+		}
+		for (const p of body.series) {
+			assert.equal(msSum[p.t], p.in + p.cr + p.cw + p.out, "modelSeries slots reconcile with global series at t=" + p.t);
+		}
 		// Range query parsing must actually take effect (regression: the raw query
 		// string used to be passed as the value, silently falling back to "all").
 		status = 0;
@@ -216,7 +244,7 @@ console.log("[2] server half");
 		assert.equal(s.context.projectedTokens, 5900, "projectedTokens always mirrors pressureTokens (occupancy computable)");
 
 		// ── raw per-step fold still dedups exactly as before ──
-		const { newSessionState, foldEvent, flushLastSample, rangeToMs, aggregateWindow, aggregateModels, sliceSession, flattenContentText } = module._internal;
+		const { newSessionState, foldEvent, flushLastSample, rangeToMs, aggregateWindow, aggregateWindowTotals, aggregateModels, sliceSession, flattenContentText } = module._internal;
 		assert.equal(flattenContentText([{ type: "text", text: "  a\n b " }, { type: "text", text: "c" }], 60), "a b c", "flatten joins text blocks");
 		assert.equal(flattenContentText([{ type: "text", text: "abcdef" }], 2), "ab…", "flatten caps length");
 		const raw = newSessionState("raw");
@@ -281,6 +309,16 @@ console.log("[2] server half");
 		assert.equal(out("30d"), 30, "30d window keeps 2h + 3d buckets");
 		assert.equal(out("all"), 60, "all window keeps every bucket");
 		assert.equal(out(undefined), 60, "no range = all");
+		// ── aggregateWindowTotals: rolling-window totals for the summary pane ──
+		const wt = aggregateWindowTotals(map);
+		assert.deepEqual(wt.all, { uncached: 600, cacheRead: 0, cacheWrite: 0, output: 60, calls: 0 }, "windowTotals.all spans every bucket");
+		assert.deepEqual(wt.d30, { uncached: 300, cacheRead: 0, cacheWrite: 0, output: 30, calls: 0 }, "windowTotals.d30 keeps 2h + 3d buckets");
+		assert.deepEqual(wt.d7, { uncached: 300, cacheRead: 0, cacheWrite: 0, output: 30, calls: 0 }, "windowTotals.d7 keeps 2h + 3d buckets");
+		assert.deepEqual(wt.d1, { uncached: 100, cacheRead: 0, cacheWrite: 0, output: 10, calls: 0 }, "windowTotals.d1 keeps only the 2h bucket");
+		const wtEmpty = aggregateWindowTotals(new Map());
+		assert.deepEqual(wtEmpty.all, { uncached: 0, cacheRead: 0, cacheWrite: 0, output: 0, calls: 0 }, "windowTotals on empty state map is all zeros");
+		// Windows must stay nested: d1 ≤ d7 ≤ d30 ≤ all.
+		assert.ok(wt.d1.output <= wt.d7.output && wt.d7.output <= wt.d30.output && wt.d30.output <= wt.all.output, "windowTotals windows nested");
 		const s1 = aggregateWindow(map, rangeToMs("1d")).series;
 		assert.ok(s1.length >= 24 && s1.length <= 26, `1d series continuous (~25 hourly points, got ${s1.length})`);
 		assert.equal(s1.reduce((a, b) => a + b.out, 0), 10, "1d series sums to window output");
@@ -485,4 +523,6 @@ try {
 }
 
 console.log(failures === 0 ? "\nALL PASSED" : `\n${failures} FAILURE(S)`);
+// 清掉自检用的隔离 DSH_HOME，不在源码树留垃圾。
+try { rmSync(SELFTEST_HOME, { recursive: true, force: true }); } catch { /* 忽略 */ }
 process.exit(failures === 0 ? 0 : 1);

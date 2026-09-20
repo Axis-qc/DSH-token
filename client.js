@@ -331,6 +331,7 @@ window.__ModuleLoader__.load({
 			"dsh-token-dashboard .tdb-tip.show{ opacity: 1; }",
 			"dsh-token-dashboard .tdb-tip b{ color: var(--tdb-fg); font-weight: 600; margin-right: 4px; }",
 			"dsh-token-dashboard .tdb-tip .tdb-tip-time { color: var(--tdb-fg-muted); font-size: 10px; display: block; }",
+			"dsh-token-dashboard .tdb-tip .tdb-tip-detail { color: var(--tdb-fg-muted); font-size: 10px; display: block; font-variant-numeric: tabular-nums; }",
 			"dsh-token-dashboard svg.tdb-svg .tdb-cursor{ stroke: var(--tdb-fg-muted); stroke-width: 1; stroke-dasharray: 2 2; opacity: 0; transition: opacity .12s ease; }",
 			"dsh-token-dashboard svg.tdb-svg .tdb-cursor.show{ opacity: .5; }",
 			// 页脚
@@ -425,6 +426,40 @@ window.__ModuleLoader__.load({
 			"  display: block; height: 100%; background: linear-gradient(90deg, var(--tdb-accent-in), var(--tdb-accent-out));",
 			"  border-radius: 2px;",
 			"}",
+			// 汇总面板：四个滚动窗口卡 + 按日期柱状图
+			"dsh-token-dashboard .tdb-wsum{ display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }",
+			"dsh-token-dashboard .tdb-wsum .tdb-cell{ min-width: 0; padding: 6px 8px; gap: 1px; }",
+			"dsh-token-dashboard .tdb-wsum .tdb-cell b{ font-size: 13px; }",
+			"dsh-token-dashboard .tdb-wsum .tdb-cell span{ font-size: 9px; }",
+			"dsh-token-dashboard .tdb-wsum .tdb-cell.tdb-w-all b{ color: var(--tdb-accent-ctx); }",
+			"dsh-token-dashboard .tdb-wsum .tdb-cell.tdb-w-d30 b{ color: var(--tdb-accent-in); }",
+			"dsh-token-dashboard .tdb-wsum .tdb-cell.tdb-w-d7 b{ color: var(--tdb-accent-cr); }",
+			"dsh-token-dashboard .tdb-wsum .tdb-cell.tdb-w-d1 b{ color: var(--tdb-accent-out); }",
+			// 按日期柱状图：竖条 + 悬停高亮；容器横跨整个面板宽度，柱宽自适应
+			// （min-width: 0 让超长历史（数百天）也能均分压进容器内，不会裁掉最近的数据）。
+			// 柱列是纵向 flex：单段（总量模式）一根 <i>，堆叠（按模型模式）多段
+			// <i> 自底向上叠放，各段高度按占当日总量比例分配。
+			"dsh-token-dashboard .tdb-bars{",
+			"  display: flex; align-items: flex-end; gap: 1px;",
+			"  height: 84px; padding: 4px 4px 0;",
+			"  background: var(--tdb-bg-elev); border-radius: 6px;",
+			"}",
+			"dsh-token-dashboard .tdb-bars .tdb-empty{ width: 100%; }",
+			"dsh-token-dashboard .tdb-bars .tdb-bcol{",
+			"  flex: 1 1 0; min-width: 0; height: 100%;",
+			"  display: flex; flex-direction: column; justify-content: flex-end; align-items: stretch; cursor: default;",
+			"}",
+			"dsh-token-dashboard .tdb-bars .tdb-bcol i{",
+			"  display: block; width: 100%; min-height: 1px;",
+			"  background: linear-gradient(180deg, var(--tdb-accent-in), var(--tdb-accent-ctx));",
+			"  opacity: .82;",
+			"  transition: opacity .1s ease, filter .1s ease;",
+			"}",
+			"dsh-token-dashboard .tdb-bars .tdb-bcol:hover i{ opacity: 1; filter: brightness(1.25); }",
+			// 汇总图表标题行：标签 + 视图切换按钮组（复用 .tdb-mpick 样式）；
+			// 右侧 tdb-bleg 常驻统计文字（N 个天有消耗 · 峰值），模型图例不在此显示
+			"dsh-token-dashboard .tdb-bhead{ display: inline-flex; align-items: center; gap: 8px; min-width: 0; }",
+			"dsh-token-dashboard .tdb-blabel{ white-space: nowrap; }",
 			// DeepSeek 余额面板
 			"dsh-token-dashboard .tdb-ds-note{",
 			"  font-size: 11px; color: var(--tdb-fg-muted); padding: 10px 8px;",
@@ -646,33 +681,30 @@ window.__ModuleLoader__.load({
 				"      <button type=\"button\" class=\"tdb-rag\" data-range=\"1h\">1小时</button>",
 				"    </div>",
 				"    <div class=\"tdb-tabs\" role=\"tablist\" aria-label=\"视图\">",
-				"      <button type=\"button\" class=\"tdb-tab\" data-tab=\"all\">总消耗</button>",
+				"      <button type=\"button\" class=\"tdb-tab\" data-tab=\"summary\">汇总</button>",
 				"      <button type=\"button\" class=\"tdb-tab\" data-tab=\"session\">会话</button>",
-				"      <button type=\"button\" class=\"tdb-tab\" data-tab=\"model\">模型</button>",
 				"      <button type=\"button\" class=\"tdb-tab\" data-tab=\"deepseek\">DeepSeek</button>",
 				"    </div>",
-				"    <div class=\"tdb-pane tdb-pane-all\">",
-				"      <div class=\"tdb-grid\">",
-				"        <div class=\"tdb-cell tdb-c-in\"><b class=\"tdb-av-in\">—</b><span><i class=\"tdb-i\"></i>输入 · uncached</span></div>",
-				"        <div class=\"tdb-cell tdb-c-out\"><b class=\"tdb-av-out\">—</b><span><i class=\"tdb-i\"></i>输出</span></div>",
-				"        <div class=\"tdb-cell tdb-c-cr\"><b class=\"tdb-av-cr\">—</b><span><i class=\"tdb-i\"></i>缓存读取</span></div>",
-				"        <div class=\"tdb-cell tdb-c-hit\"><b class=\"tdb-av-hit\">—</b><span><i class=\"tdb-i\"></i>总命中率</span></div>",
-				"        <div class=\"tdb-cell tdb-c-cw\"><b class=\"tdb-av-cw\">—</b><span><i class=\"tdb-i\"></i>缓存写入</span></div>",
-				"        <div class=\"tdb-cell tdb-c-ctx\"><b class=\"tdb-av-ctx\">—</b><span><i class=\"tdb-i\"></i>上下文占用</span></div>",
-				"        <div class=\"tdb-cell tdb-c-calls\"><b class=\"tdb-av-calls\">—</b><span><i class=\"tdb-i\"></i>API 调用次数 · 全部会话</span></div>",
+				"    <div class=\"tdb-pane tdb-pane-summary\" hidden=\"\">",
+				"      <div class=\"tdb-wsum\">",
+				"        <div class=\"tdb-cell tdb-w-all\" title=\"\"><b class=\"tdb-wv-all\">—</b><span>累计总消耗</span></div>",
+				"        <div class=\"tdb-cell tdb-w-d30\" title=\"\"><b class=\"tdb-wv-d30\">—</b><span>最近一月</span></div>",
+				"        <div class=\"tdb-cell tdb-w-d7\" title=\"\"><b class=\"tdb-wv-d7\">—</b><span>最近一周</span></div>",
+				"        <div class=\"tdb-cell tdb-w-d1\" title=\"\"><b class=\"tdb-wv-d1\">—</b><span>最近一日</span></div>",
 				"      </div>",
 				"      <div class=\"tdb-chart\">",
-				"        <div class=\"tdb-clabel\"><span class=\"tdb-mpick tdb-apick\" role=\"tablist\" aria-label=\"图表数据\">",
-				"          <button type=\"button\" data-metric=\"out\">输出</button>",
-				"          <button type=\"button\" data-metric=\"in\">输入</button>",
-				"          <button type=\"button\" data-metric=\"cr\">缓存读取</button>",
-				"          <button type=\"button\" data-metric=\"total\">总消耗</button>",
-				"          <button type=\"button\" data-metric=\"calls\">调用次数</button>",
-				"        </span><span class=\"tdb-ac1l\"></span></div>",
-				"        <div class=\"tdb-chart-wrap\"><div class=\"tdb-ac1\"><div class=\"tdb-empty\">暂无趋势数据</div></div><div class=\"tdb-tip\" role=\"tooltip\"></div></div>",
-				"        <div class=\"tdb-clabel\"><span>每小时总消耗</span><span class=\"tdb-ac2l\"></span></div>",
-				"        <div class=\"tdb-chart-wrap\"><div class=\"tdb-ac2\"><div class=\"tdb-empty\">暂无消耗数据</div></div><div class=\"tdb-tip\" role=\"tooltip\"></div></div>",
+				"        <div class=\"tdb-clabel\"><span class=\"tdb-bhead\"><span class=\"tdb-blabel\">每日总消耗</span><span class=\"tdb-mpick tdb-bpick\" role=\"tablist\" aria-label=\"柱状图模式\">",
+				"          <button type=\"button\" data-bmode=\"stack\">按模型</button>",
+				"          <button type=\"button\" data-bmode=\"total\">总量</button>",
+				"        </span></span><span class=\"tdb-bleg\"></span></div>",
+				"        <div class=\"tdb-chart-wrap\"><div class=\"tdb-bars\"><div class=\"tdb-empty\">暂无消耗数据</div></div><div class=\"tdb-tip\" role=\"tooltip\"></div></div>",
 				"      </div>",
+				"      <div class=\"tdb-mcontrols\">",
+				"        <label class=\"tdb-msearch\" title=\"搜索模型或提供商\"><input class=\"tdb-msearch-input\" type=\"search\" placeholder=\"搜索模型或提供商\" aria-label=\"搜索模型或提供商\"></label>",
+				"        <select class=\"tdb-mfilter\" aria-label=\"筛选提供商\"></select>",
+				"        <span class=\"tdb-mcount\"></span>",
+				"      </div>",
+				"      <div class=\"tdb-mlist tdb-smlist\"><div class=\"tdb-empty\">暂无模型数据</div></div>",
 				"    </div>",
 				"    <div class=\"tdb-pane tdb-pane-session\" hidden=\"\">",
 				"      <div class=\"tdb-selrow\">",
@@ -699,14 +731,6 @@ window.__ModuleLoader__.load({
 				"        <div class=\"tdb-clabel\"><span>每小时总消耗</span><span class=\"tdb-c2-legend\"></span></div>",
 				"        <div class=\"tdb-chart-wrap\"><div class=\"tdb-c2\"><div class=\"tdb-empty\">暂无消耗数据</div></div><div class=\"tdb-tip\" role=\"tooltip\"></div></div>",
 				"      </div>",
-				"    </div>",
-				"    <div class=\"tdb-pane tdb-pane-model\" hidden=\"\">",
-				"      <div class=\"tdb-mcontrols\">",
-				"        <label class=\"tdb-msearch\" title=\"搜索模型或提供商\"><input class=\"tdb-msearch-input\" type=\"search\" placeholder=\"搜索模型或提供商\" aria-label=\"搜索模型或提供商\"></label>",
-				"        <select class=\"tdb-mfilter\" aria-label=\"筛选提供商\"></select>",
-				"        <span class=\"tdb-mcount\"></span>",
-				"      </div>",
-				"      <div class=\"tdb-mlist\"><div class=\"tdb-empty\">暂无模型数据</div></div>",
 				"    </div>",
 				"    <div class=\"tdb-pane tdb-pane-deepseek\" hidden=\"\">",
 				"      <div class=\"tdb-ds-note\"></div>",
@@ -776,11 +800,11 @@ window.__ModuleLoader__.load({
 			var selId = readStore("session", "");
 			/** 自动跟随最近活动的会话（默认开启）。 */
 			var follow = readStore("follow", "1") === "1";
-			/** 活动视图："all" = 总消耗（聚合），"session" = 按会话，
-			 *  "model" = 按模型消耗，"deepseek" = 官方余额。 */
-			var tab = readStore("tab", "session");
-			if (tab !== "all" && tab !== "session" && tab !== "model" && tab !== "deepseek") tab = "session";
-			var TAB_ORDER = ["all", "session", "model", "deepseek"];
+			/** 活动视图："summary" = 跨窗口汇总 + 按提供商分组的模型明细
+			 *  （默认首页），"session" = 按会话，"deepseek" = 官方余额。 */
+			var tab = readStore("tab", "summary");
+			if (tab !== "summary" && tab !== "session" && tab !== "deepseek") tab = "summary";
+			var TAB_ORDER = ["summary", "session", "deepseek"];
 			/** 模型面板的提供商筛选（"" = 全部提供商）与文本搜索。 */
 			var mFilter = readStore("mfilter", "");
 			var mSearch = readStore("msearch", "");
@@ -793,11 +817,21 @@ window.__ModuleLoader__.load({
 				}
 			} catch { /* 展开状态损坏——使用默认状态 */ }
 			var tabBtns = root.querySelectorAll(".tdb-tab");
-			var paneAll = root.querySelector(".tdb-pane-all");
+			var paneSummary = root.querySelector(".tdb-pane-summary");
 			var paneSession = root.querySelector(".tdb-pane-session");
-			var paneModel = root.querySelector(".tdb-pane-model");
 			var paneDeepseek = root.querySelector(".tdb-pane-deepseek");
-			var mlistEl = root.querySelector(".tdb-mlist");
+			var smListEl = root.querySelector(".tdb-smlist");
+			var smBarsEl = root.querySelector(".tdb-pane-summary .tdb-bars");
+			var smBarsTip = smBarsEl.parentElement.querySelector(".tdb-tip");
+			var smBarsLeg = root.querySelector(".tdb-pane-summary .tdb-bleg");
+			var smBarsLabel = root.querySelector(".tdb-pane-summary .tdb-blabel");
+			/** 每日柱状图的显示模式："stack" = 按模型堆叠（默认），
+			 *  "total" = 单一总量柱。与其他视图偏好一样持久化。 */
+			var barMode = readStore("barmode", "stack");
+			if (barMode !== "stack" && barMode !== "total") barMode = "stack";
+			var barBtns = root.querySelectorAll(".tdb-bpick button");
+			var wvEls = {};
+			[["all", ".tdb-wv-all"], ["d30", ".tdb-wv-d30"], ["d7", ".tdb-wv-d7"], ["d1", ".tdb-wv-d1"]].forEach(function (p) { wvEls[p[0]] = root.querySelector(p[1]); });
 			var mFilterEl = root.querySelector(".tdb-mfilter");
 			var mSearchEl = root.querySelector(".tdb-msearch-input");
 			var mCountEl = root.querySelector(".tdb-mcount");
@@ -811,24 +845,10 @@ window.__ModuleLoader__.load({
 			var dsChartWrap = dsChart.parentElement;
 			var dsTip = dsChartWrap.querySelector(".tdb-tip");
 			var dsLeg = root.querySelector(".tdb-ds-leg");
-			var aels = {};
-			[["in", ".tdb-av-in"], ["out", ".tdb-av-out"], ["cr", ".tdb-av-cr"], ["hit", ".tdb-av-hit"], ["cw", ".tdb-av-cw"], ["ctx", ".tdb-av-ctx"], ["calls", ".tdb-av-calls"]].forEach(function (p) { aels[p[0]] = root.querySelector(p[1]); });
-			var ac1 = root.querySelector(".tdb-ac1");
-			var ac2 = root.querySelector(".tdb-ac2");
-			var ac1Wrap = ac1.parentElement;
-			var ac2Wrap = ac2.parentElement;
-			var ac1Tip = ac1Wrap.querySelector(".tdb-tip");
-			var ac2Tip = ac2Wrap.querySelector(".tdb-tip");
-			var ac1leg = root.querySelector(".tdb-ac1l");
-			var ac2leg = root.querySelector(".tdb-ac2l");
-			/** 总消耗 / 会话两个面板中第一个图表显示的指标。每个面板
-			 *  保留各自的选择，与其他视图偏好一样持久化。 */
+			/** 会话面板第一个图表显示的指标，与其他视图偏好一样持久化。 */
 			var METRICS = ["out", "in", "cr", "total", "calls"];
-			var aMetric = readStore("ametric", "out");
 			var sMetric = readStore("smetric", "out");
-			if (METRICS.indexOf(aMetric) === -1) aMetric = "out";
 			if (METRICS.indexOf(sMetric) === -1) sMetric = "out";
-			var aPickBtns = root.querySelectorAll(".tdb-apick button");
 			var sPickBtns = root.querySelectorAll(".tdb-spick button");
 
 			/** 每个指标的图表配置：如何从一个趋势点取值、
@@ -841,6 +861,17 @@ window.__ModuleLoader__.load({
 				total: { label: "总消耗(整体)", color: "var(--tdb-accent-ctx)", unit: "tok", pick: function (s) { return s.in + s.cr + (s.cw || 0) + s.out; } },
 				calls: { label: "API 调用次数", color: "var(--tdb-accent-calls)", unit: "次", pick: function (s) { return typeof s.calls === "number" ? s.calls : 0; } },
 			};
+
+			/** 堆叠柱状图每个模型的分段配色（依消耗排名取色）：
+			 *  优先复用面板强调色，随后用 design-token 色板补足，
+			 *  保证浅色/深色主题下均可辨识。 */
+			var STACK_COLORS = [
+				"var(--tdb-accent-in)",
+				"var(--tdb-accent-out)",
+				"var(--tdb-accent-cr)",
+				"var(--tdb-accent-calls)",
+				"var(--tdb-accent-ctx)",
+			];
 
 			/** 渲染某个面板可切换的第一个图表。 */
 			function renderMetricChart(container, legendEl, series, metric) {
@@ -984,58 +1015,6 @@ window.__ModuleLoader__.load({
 			 *  （不能只在加载时求值一次，否则 1h → 30d 后单位会卡在「分」）。 */
 			var slotUnit = function () { return range === "1h" ? " 分" : range === "30d" || range === "all" ? " 天" : " 时"; };
 
-			/** 渲染总消耗（聚合）面板：累计字段直接求和、
-			 *  加权总命中率，不含上下文占用率（这是瞬时性的
-			 *  按会话指标，没有有意义的合计值）。 */
-			function renderPaneAll() {
-				if (!data || !data.totals) {
-					for (var k in aels) aels[k].textContent = "—";
-					ac1.innerHTML = '<div class="tdb-empty">暂无趋势数据</div>';
-					ac2.innerHTML = '<div class="tdb-empty">暂无消耗数据</div>';
-					ac1leg.textContent = ac2leg.textContent = "";
-					return;
-				}
-				var t = data.totals;
-				var billed = (t.uncached || 0) + (t.cacheRead || 0) + (t.cacheWrite || 0);
-				var hit = billed > 0 ? ((t.cacheRead || 0) / billed) * 100 : null;
-				aels.in.textContent = fmt(t.uncached);
-				aels.out.textContent = fmt(t.output);
-				aels.cr.textContent = fmt(t.cacheRead);
-				if (data.hasCacheWrite === false) {
-					aels.cw.textContent = "—";
-					aels.cw.parentElement.title = "数据源未上报缓存写入";
-				} else {
-					aels.cw.textContent = fmt(t.cacheWrite);
-					aels.cw.parentElement.title = "";
-				}
-				aels.hit.textContent = pct(hit, 1);
-				aels.ctx.textContent = "—";
-				aels.ctx.parentElement.title = "上下文占用是单会话实时状态,不参与总量统计";
-				var series = Array.isArray(data.series) ? data.series : [];
-				// 时间窗口内的 API 调用次数：assistant/消息事件的精确计数。
-				var aCalls = typeof t.calls === "number" ? t.calls : null;
-				aels.calls.textContent = aCalls === null ? "—" : String(aCalls);
-				aels.calls.parentElement.title = aCalls === null
-					? "数据源未上报调用次数"
-					: "当前时间范围内所有会话的 API 调用次数(每次模型回复计 1 次)";
-				// 总消耗 = API 整体消耗（uncached 输入 + 缓存读取 +
-				// 缓存写入 + 输出），未计费环境直接统计整体流量。
-				var totalVals = series.map(function (s) { return s.in + s.cr + (s.cw || 0) + s.out; });
-				renderMetricChart(ac1, ac1leg, series, aMetric);
-				renderChart(ac2, ac2leg, totalVals, {
-					color: "var(--tdb-accent-in)",
-					unit: "tok",
-					min: 0,
-					legend: totalVals.length >= 2 ? "峰值 " + fmt(Math.max.apply(null, totalVals)) + " · " + totalVals.length + slotUnit() : "",
-					tooltip: function (i) {
-						var s = series[i];
-						return "<b>" + fmt(s.in + s.cr + (s.cw || 0) + s.out) + " tok</b>总消耗(整体)" +
-							'<span class="tdb-tip-time">' + tf(s.t) + "</span>";
-					},
-					emptyMsg: "暂无消耗数据",
-				});
-			}
-
 			/** 渲染某个会话的会话面板。 */
 			function renderPaneSession(session) {
 				if (!data || !data.totals || !session) {
@@ -1094,7 +1073,8 @@ window.__ModuleLoader__.load({
 				});
 			}
 
-			/** 渲染模型面板：提供商可折叠，模型支持文本搜索；每个模型用一行
+			/** 渲染汇总页的模型明细：提供商可折叠分组 + 搜索/筛选
+			 *  （原「模型」页逻辑整体并入汇总页）；每个模型用一行
 			 *  摘要承载总量，第二行用紧凑指标承载 token 明细。 */
 			function renderPaneModel() {
 				var models = data && Array.isArray(data.models) ? data.models : [];
@@ -1117,28 +1097,17 @@ window.__ModuleLoader__.load({
 				mSearchEl.value = mSearch;
 				if (models.length === 0) {
 					mCountEl.textContent = "";
-					mlistEl.innerHTML = '<div class="tdb-empty">暂无模型数据</div>';
+					smListEl.innerHTML = '<div class="tdb-empty">暂无模型数据</div>';
 					return;
 				}
 
-				// 先按提供商和搜索词筛选，再生成分组；这样搜索结果仍保持层次结构。
-				var visible = [];
-				for (var i = 0; i < models.length; i++) {
-					var model = models[i];
-					var provider = (typeof model.provider === "string" && model.provider !== "" && model.provider !== "未知")
-						? model.provider
-						: "未知提供商";
-					var modelName = typeof model.model === "string" && model.model !== "" ? model.model : "未知";
-					var haystack = (provider + " " + modelName).toLowerCase();
-					if (filter !== "" && provider !== filter) continue;
-					if (query !== "" && haystack.indexOf(query) === -1) continue;
-					visible.push({ model: model, provider: provider, name: modelName });
-				}
+				// 与柱状图共用同一套过滤（filteredModels），保证两处所见一致。
+				var visible = filteredModels().visible;
 				mCountEl.textContent = visible.length === models.length
 					? models.length + " 个模型"
 					: visible.length + " / " + models.length + " 个模型";
 				if (visible.length === 0) {
-					mlistEl.innerHTML = '<div class="tdb-empty">没有匹配的模型</div>';
+					smListEl.innerHTML = '<div class="tdb-empty">没有匹配的模型</div>';
 					return;
 				}
 
@@ -1204,14 +1173,257 @@ window.__ModuleLoader__.load({
 					}
 					out.push('</div></details>');
 				}
-				mlistEl.innerHTML = out.join("");
-				var groupEls = mlistEl.querySelectorAll(".tdb-mgroup");
+				smListEl.innerHTML = out.join("");
+				var groupEls = smListEl.querySelectorAll(".tdb-mgroup");
 				for (var ge = 0; ge < groupEls.length; ge++) {
 					groupEls[ge].addEventListener("toggle", function () {
 						mGroupOpen[this.getAttribute("data-provider")] = this.open;
 						writeStore("mgroups", JSON.stringify(mGroupOpen));
 					});
 				}
+			}
+
+			/** 渲染汇总面板：累计/1月/1周/1日 四个滚动窗口卡片（服务端
+			 *  windowTotals 单遍累计，与所选时间范围无关）、跟随时间范围
+			 *  的每日柱状图（按模型堆叠 / 总量双模式，悬停显示分项明细），
+			 *  以及按提供商分组、可搜索筛选的模型明细（原「模型」页整体并入）。 */
+			function renderPaneSummary() {
+				if (!data) {
+					smListEl.innerHTML = '<div class="tdb-empty">暂无模型数据</div>';
+					smBarsEl.innerHTML = '<div class="tdb-empty">暂无消耗数据</div>';
+					smBarsLeg.innerHTML = "";
+					return;
+				}
+				// ── 四窗口卡片 ──
+				var wt = data && data.windowTotals ? data.windowTotals : null;
+				var wMeta = [
+					["all", "累计总消耗", "全部历史累计"],
+					["d30", "最近一月", "滚动窗口：now-30天 至今"],
+					["d7", "最近一周", "滚动窗口：now-7天 至今"],
+					["d1", "最近一日", "滚动窗口：now-24小时 至今"],
+				];
+				for (var wi = 0; wi < wMeta.length; wi++) {
+					var wk = wMeta[wi][0];
+					var el = wvEls[wk];
+					var wv = wt ? wt[wk] : null;
+					if (!wv) {
+						el.textContent = "—";
+						el.parentElement.title = wMeta[wi][2] + " · 暂无数据";
+					} else {
+						el.textContent = fmt(overall(wv));
+						el.parentElement.title = wMeta[wi][2] +
+							" · 输入 " + fmt(wv.uncached) + " / 缓存读 " + fmt(wv.cacheRead) +
+							" / 缓存写 " + fmt(wv.cacheWrite) + " / 输出 " + fmt(wv.output) +
+							" / 调用 " + (typeof wv.calls === "number" ? wv.calls : "—") + " 次" +
+							"（口径：整体消耗 = 输入 + 缓存读写 + 输出）";
+					}
+				}
+				// ── 每日柱状图：数据取当前范围的 series（30d/全部时服务端已按天
+				//  分桶；7d/1d 按小时、1h 按分钟，标签相应变化）。 ──
+				var series = data && Array.isArray(data.series) ? data.series : [];
+				var perDay = range === "30d" || range === "all";
+				var perMin = range === "1h";
+				var unitLbl = perDay ? "天" : perMin ? "分钟" : "小时";
+				if (smBarsLabel) smBarsLabel.textContent = perDay ? "每日总消耗" : perMin ? "每分钟总消耗" : "每小时总消耗";
+				smBarsEl.innerHTML = "";
+				smBarsLeg.innerHTML = "";
+				var grandVals = series.map(function (s) { return (s.in || 0) + (s.cr || 0) + (s.cw || 0) + (s.out || 0); });
+				// 柱状图跟随搜索/筛选：与下方分组列表共用同一份可见模型集合，
+				// 只统计可见模型的时段消耗（未过滤时与全局序列对账一致）。
+				var fv = filteredModels();
+				var filterActive = mFilter !== "" || String(mSearch || "").trim() !== "";
+				var hasMs = Array.isArray(data.modelSeries) && data.modelSeries.length > 0;
+				var agg = hasMs ? aggregateModelSeries(data.modelSeries, fv.visible) : null;
+				// 可见模型的每槽分项合计（无堆叠数据时为 null → 退回全局序列）。
+				var sums = agg ? agg.sums : null;
+				var vals;
+				if (sums) {
+					vals = [];
+					for (var zi = 0; zi < series.length; zi++) {
+						var d0 = sums[zi];
+						vals.push(d0 ? (d0.in + d0.cr + d0.cw + d0.out) : 0);
+					}
+				} else {
+					vals = grandVals;
+				}
+				if (series.length === 0) {
+					smBarsEl.innerHTML = '<div class="tdb-empty">暂无消耗数据</div>';
+				} else if (filterActive && fv.visible.length === 0) {
+					smBarsEl.innerHTML = '<div class="tdb-empty">没有匹配的模型</div>';
+				} else if (barMode === "stack" && hasMs) {
+					// ── 堆叠模式：按模型分段着色。跟随搜索/筛选，每个可见模型
+					//  独立成段（不再合并「其他」），模型小时桶已由服务端按时段切片。 ──
+					var parts = agg.parts;
+					var max = Math.max.apply(null, vals);
+					if (max <= 0) max = 1;
+					var peaks = 0;
+					var frag = document.createDocumentFragment();
+					for (var bi = 0; bi < series.length; bi++) {
+						var col = document.createElement("div");
+						col.className = "tdb-bcol";
+						for (var pj = 0; pj < parts.length; pj++) {
+							var segVal = parts[pj].perSlot[bi] || 0;
+							if (segVal <= 0) continue;
+							var seg = document.createElement("i");
+							seg.style.height = Math.max(1, (segVal / max) * 100).toFixed(2) + "%";
+							seg.style.background = parts[pj].color;
+							col.appendChild(seg);
+						}
+						if (vals[bi] > 0) peaks++;
+						frag.appendChild(col);
+					}
+					smBarsEl.appendChild(frag);
+					var maxI = vals.indexOf(max);
+					// 图例位置放统计文字（N 个天有消耗 · 峰值），模型图例不常驻：
+					// 具体模型归属由悬停 tooltip 与下方分组列表承载。
+					var legendTxt = peaks + " 个" + unitLbl + "有消耗 · " + (series[maxI] ? tf(series[maxI].t) + " 峰值 " + fmt(max) + " tok" : "");
+					smBarsLeg.textContent = legendTxt;
+					// 悬停交互：跟随的 tooltip 显示该时段的按模型消耗 + 全局分项。
+					var onBarMove = function (ev) {
+						var rect = smBarsEl.getBoundingClientRect();
+						var x = ev.clientX - rect.left;
+						var frac = Math.max(0, Math.min(1, x / rect.width));
+						var i = Math.round(frac * (series.length - 1));
+						var s = series[i];
+						var v = vals[i];
+						var rows = "";
+						for (var rj = 0; rj < parts.length; rj++) {
+							var rv = parts[rj].perSlot[i] || 0;
+							if (rv <= 0) continue;
+							rows += '<span class="tdb-tip-detail"><i style="display:inline-block;width:7px;height:7px;border-radius:2px;background:' + parts[rj].color + ';margin-right:4px"></i>' + esc(parts[rj].label) + "  " + fmt(rv) + " tok</span>";
+						}
+						smBarsTip.innerHTML = "<b>" + fmt(v) + " tok</b>总消耗(整体)" +
+							'<span class="tdb-tip-time">' + tf(s.t) + "</span>" +
+							rows +
+							'<span class="tdb-tip-detail">入 ' + fmt(s.in) + " · 读 " + fmt(s.cr) + " · 写 " + fmt(s.cw || 0) + " · 出 " + fmt(s.out) + "</span>" +
+							(typeof s.calls === "number" ? '<span class="tdb-tip-detail">调用 ' + s.calls + " 次</span>" : "");
+						var tipRect = smBarsTip.getBoundingClientRect();
+						var px = Math.max(2, Math.min(rect.width - tipRect.width - 2, x - tipRect.width / 2));
+						var py = Math.max(0, Math.min(rect.height - tipRect.height - 2, 8));
+						smBarsTip.style.left = px + "px";
+						smBarsTip.style.top = py + "px";
+						smBarsTip.classList.add("show");
+					};
+					var onBarLeave = function () { smBarsTip.classList.remove("show"); };
+					// 用 on* 属性而不是 addEventListener：容器是持久元素，
+					// 每次轮询重渲染时属性赋值自动覆盖，监听器不会叠加。
+					smBarsEl.onmousemove = onBarMove;
+					smBarsEl.onmouseleave = onBarLeave;
+					smBarsEl.ontouchstart = function (ev) { var t = ev.touches && ev.touches[0]; if (t) onBarMove(t); };
+					smBarsEl.ontouchend = onBarLeave;
+				} else {
+					// ── 总量模式（或堆叠数据缺失时的兜底）：单一总量柱，
+					//  同样只统计搜索/筛选后的可见模型。 ──
+					var max2 = Math.max.apply(null, vals);
+					if (max2 <= 0) max2 = 1;
+					var peaks2 = 0;
+					var frag2 = document.createDocumentFragment();
+					for (var bi2 = 0; bi2 < series.length; bi2++) {
+						var col2 = document.createElement("div");
+						col2.className = "tdb-bcol";
+						var bar = document.createElement("i");
+						bar.style.height = Math.max(1.5, (vals[bi2] / max2) * 100).toFixed(1) + "%";
+						if (vals[bi2] > 0) peaks2++;
+						col2.appendChild(bar);
+						frag2.appendChild(col2);
+					}
+					smBarsEl.appendChild(frag2);
+					var maxI2 = vals.indexOf(max2);
+					var legend2 = peaks2 + " 个" + unitLbl + "有消耗 · " + (series[maxI2] ? tf(series[maxI2].t) + " 峰值 " + fmt(max2) + " tok" : "");
+					smBarsLeg.textContent = legend2;
+					// 悬停交互：跟随的 tooltip 显示当日/当小时完整分项。
+					var onBarMove2 = function (ev) {
+						var rect = smBarsEl.getBoundingClientRect();
+						var x = ev.clientX - rect.left;
+						var frac = Math.max(0, Math.min(1, x / rect.width));
+						var i = Math.round(frac * (series.length - 1));
+						var s = series[i];
+						var v = vals[i];
+						smBarsTip.innerHTML = v <= 0
+							? "无消耗" + '<span class="tdb-tip-time">' + tf(s.t) + "</span>"
+							: "<b>" + fmt(v) + " tok</b>总消耗(整体)" +
+								'<span class="tdb-tip-time">' + tf(s.t) + "</span>" +
+								'<span class="tdb-tip-detail">入 ' + fmt(s.in) + " · 读 " + fmt(s.cr) + " · 写 " + fmt(s.cw || 0) + " · 出 " + fmt(s.out) + "</span>" +
+								(typeof s.calls === "number" ? '<span class="tdb-tip-detail">调用 ' + s.calls + " 次</span>" : "");
+						var tipRect = smBarsTip.getBoundingClientRect();
+						var px = Math.max(2, Math.min(rect.width - tipRect.width - 2, x - tipRect.width / 2));
+						var py = Math.max(0, Math.min(rect.height - tipRect.height - 2, 8));
+						smBarsTip.style.left = px + "px";
+						smBarsTip.style.top = py + "px";
+						smBarsTip.classList.add("show");
+					};
+					var onBarLeave2 = function () { smBarsTip.classList.remove("show"); };
+					smBarsEl.onmousemove = onBarMove2;
+					smBarsEl.onmouseleave = onBarLeave2;
+					smBarsEl.ontouchstart = function (ev) { var t2 = ev.touches && ev.touches[0]; if (t2) onBarMove2(t2); };
+					smBarsEl.ontouchend = onBarLeave2;
+				}
+				// ── 模型明细：按提供商分组 + 搜索/筛选（原「模型」页逻辑）。 ──
+				renderPaneModel();
+			}
+
+			/** 堆叠柱状图的模型分段：把服务端按模型的每时段序列
+			 *  （modelSeries）折叠为每个可见模型一个独立分段（不合并「其他」）。
+			 *  parts 与传入 models 同序（服务端已按整体消耗降序），
+			 *  每段携带与服务端 series 一一对应的 perSlot 数组；
+			 *  sums 是所有分段每槽的分项合计（in/cr/cw/out），
+			 *  过滤激活时柱高与 tooltip 都以它为准。 */
+			function aggregateModelSeries(modelSeries, models) {
+				var parts = [];
+				for (var i = 0; i < models.length; i++) {
+					// filteredModels 的可见项形状是 { model: 模型对象, provider, name: 模型名字符串 }，
+					// key/label 必须取 name（模型名字符串）而不是 model（整个模型对象）。
+					var mKey = (models[i].provider || "") + "|" + (models[i].name || "");
+					var modelName = (typeof models[i].name === "string" && models[i].name !== "") ? models[i].name : "未知";
+					parts.push({ key: mKey, label: modelName, color: STACK_COLORS[i % STACK_COLORS.length], perSlot: [] });
+				}
+				// 每槽分项合计（跨分段求和，供过滤后的总量柱与 tooltip 使用）。
+				var sums = [];
+				// 单遍扫描服务端 modelSeries：每条 { key, series } 按序累加。
+				for (var si = 0; si < modelSeries.length; si++) {
+					var entry = modelSeries[si];
+					var dst = null;
+					for (var di = 0; di < parts.length; di++) {
+						if (parts[di].key === entry.key) { dst = parts[di]; break; }
+					}
+					if (dst === null) continue; // 不在可见集合中的模型跳过
+					var src = entry.series || [];
+					for (var ki = 0; ki < src.length; ki++) {
+						var dIn = src[ki].in || 0, dCr = src[ki].cr || 0, dCw = src[ki].cw || 0, dOut = src[ki].out || 0;
+						dst.perSlot[ki] = (dst.perSlot[ki] || 0) + dIn + dCr + dCw + dOut;
+						if (!sums[ki]) sums[ki] = { in: 0, cr: 0, cw: 0, out: 0 };
+						sums[ki].in += dIn;
+						sums[ki].cr += dCr;
+						sums[ki].cw += dCw;
+						sums[ki].out += dOut;
+					}
+				}
+				// 过滤模式下未在 modelSeries 中出现的可见模型（无时段数据）也保留分段位，
+				// perSlot 保持为空数组即可（渲染时自然跳过零值段）。
+				return { parts: parts, sums: sums };
+			}
+
+			/** 与下方分组列表同一套过滤规则（提供商筛选 + 搜索词）求可见模型，
+			 *  供柱状图与列表共用；provider 归一逻辑与 renderPaneModel 一致。 */
+			function filteredModels() {
+				var models = data && Array.isArray(data.models) ? data.models : [];
+				var filter = mFilter;
+				var query = String(mSearch || "").trim().toLowerCase();
+				if (filter !== "" && models.every(function (m) {
+					var p = (typeof m.provider === "string" && m.provider !== "" && m.provider !== "未知") ? m.provider : "未知提供商";
+					return p !== filter;
+				})) filter = "";
+				var visible = [];
+				for (var i = 0; i < models.length; i++) {
+					var model = models[i];
+					var provider = (typeof model.provider === "string" && model.provider !== "" && model.provider !== "未知") ? model.provider : "未知提供商";
+					var modelName = typeof model.model === "string" && model.model !== "" ? model.model : "未知";
+					var haystack = (provider + " " + modelName).toLowerCase();
+					if (filter !== "" && provider !== filter) continue;
+					if (query !== "" && haystack.indexOf(query) === -1) continue;
+					visible.push({ model: model, provider: provider, name: modelName });
+				}
+				return { visible: visible, filter: filter };
 			}
 
 			/** 渲染 DeepSeek 面板：官方账户余额（未配置密钥或 fetch 失败时
@@ -1341,52 +1553,34 @@ window.__ModuleLoader__.load({
 				for (var ti = 0; ti < tabBtns.length; ti++) {
 					tabBtns[ti].classList.toggle("active", tabBtns[ti].getAttribute("data-tab") === tab);
 				}
-				for (var api = 0; api < aPickBtns.length; api++) {
-					aPickBtns[api].classList.toggle("active", aPickBtns[api].getAttribute("data-metric") === aMetric);
-				}
 				for (var spi = 0; spi < sPickBtns.length; spi++) {
 					sPickBtns[spi].classList.toggle("active", sPickBtns[spi].getAttribute("data-metric") === sMetric);
 				}
-				paneAll.hidden = tab !== "all";
+				for (var bbi = 0; bbi < barBtns.length; bbi++) {
+					barBtns[bbi].classList.toggle("active", barBtns[bbi].getAttribute("data-bmode") === barMode);
+				}
+				paneSummary.hidden = tab !== "summary";
 				paneSession.hidden = tab !== "session";
-				paneModel.hidden = tab !== "model";
 				paneDeepseek.hidden = tab !== "deepseek";
 
 				var session = selectedSession(); // 会话面板当前的会话（或 null）
-				renderPaneAll();
+				renderPaneSummary();
 				renderPaneSession(session);
-				renderPaneModel();
 				renderPaneDeepseek();
 
 				// 头部摘要跟随当前活动的标签页。
 				var totals, hit, occupancy;
-				if (tab === "all" && data && data.totals) {
-					totals = data.totals;
-					var ab = (totals.uncached || 0) + (totals.cacheRead || 0) + (totals.cacheWrite || 0);
-					hit = ab > 0 ? ((totals.cacheRead || 0) / ab) * 100 : null;
-					occupancy = null;
-					summary.innerHTML = renderSummaryChips(totals, hit, occupancy);
-					fUpdated.textContent = "全部会话 · " + fmt(totals.output || 0) + " tok";
-					fUpdated.title = "";
-				} else if (tab === "model") {
-					// 模型标签页头部：最顶层模型 + 其消耗；页脚 = 模型数量。
-					var mods = data && Array.isArray(data.models) ? data.models : [];
-					if (mods.length > 0) {
-						var mTop = mods[0];
-						var mT = mTop.totals || {};
-						summary.innerHTML = '<span class="tdb-s-chip"><b>' + esc(fmt(overall(mT))) + '</b> ' + esc(mTop.model || "未知") + '</span>';
-						var mTotal = 0;
-						for (var mi = 0; mi < mods.length; mi++) {
-							var mt = mods[mi].totals || {};
-							mTotal += overall(mt);
-						}
-						fUpdated.textContent = mods.length + " 个模型 · " + fmt(mTotal) + " tok";
-						fUpdated.title = "范围: " + (range === "all" ? "全部" : range === "30d" ? "1月" : range === "7d" ? "1周" : range === "1d" ? "1天" : "1小时");
-					} else {
-						summary.innerHTML = '<span class="tdb-s-chip"><b>—</b> 模型</span>';
-						fUpdated.textContent = "无模型数据";
-						fUpdated.title = "";
-					}
+				if (tab === "summary") {
+					// 汇总标签页头部：累计总消耗；页脚 = 四窗口对比。
+					var wAll = data && data.windowTotals ? data.windowTotals.all : null;
+					summary.innerHTML = wAll
+						? '<span class="tdb-s-chip tdb-s-ctx"><b>' + esc(fmt(overall(wAll))) + '</b> 累计</span>'
+						: '<span class="tdb-s-chip"><b>—</b> 累计</span>';
+					var wT = data && data.windowTotals ? data.windowTotals : null;
+					fUpdated.textContent = wT
+						? "累计 " + fmt(overall(wT.all)) + " · 1月 " + fmt(overall(wT.d30)) + " · 1周 " + fmt(overall(wT.d7)) + " · 1日 " + fmt(overall(wT.d1)) + " tok"
+						: "汇总数据加载中";
+					fUpdated.title = "口径：整体消耗 = uncached 输入 + 缓存读写 + 输出；窗口随当前时刻滚动";
 				} else if (tab === "deepseek") {
 					// DeepSeek 标签页头部：官方账户余额（+ 配置状态）。
 					var db = data && data.balance ? data.balance : null;
@@ -1426,8 +1620,8 @@ window.__ModuleLoader__.load({
 				updateSelect();
 
 				// 迷你胶囊（折叠态）：跟随当前活动标签页与时间范围显示对应汇总。
-			// all/总消耗：全部会话聚合；session/会话：当前选中会话；
-			// model/模型：占比最高的模型；deepseek/DeepSeek：官方余额。
+			// summary/汇总：四个滚动窗口总量；session/会话：当前选中会话；
+			// deepseek/DeepSeek：官方余额。
 			miniEl.classList.toggle("err", !!error);
 			var rangeLabel = range === "all" ? "全部" : range === "30d" ? "1月" : range === "7d" ? "1周" : range === "1d" ? "1天" : "1小时";
 			var mB = {};
@@ -1438,28 +1632,34 @@ window.__ModuleLoader__.load({
 			var mTokenLabels = { total: "总计", in: "输入", out: "输出", cr: "缓存", hit: "命中", calls: "调用" };
 			var mBalanceLabels = { total: "余额", in: "赠送", out: "充值", cr: "1h耗", hit: "24h耗", calls: "累计耗" };
 			var mLabelSet = tab === "deepseek" ? mBalanceLabels : mTokenLabels;
+			// 汇总模式复用四个胶囊显示 累计/1月/1周/1日，命中率/调用两个胶囊隐藏。
+			if (tab === "summary") {
+				mLabelSet = { total: "累计", in: "1月", out: "1周", cr: "1日" };
+				mLabelEls.hit.parentElement.style.display = "none";
+				mLabelEls.calls.parentElement.style.display = "none";
+			} else {
+				mLabelEls.hit.parentElement.style.display = "";
+				mLabelEls.calls.parentElement.style.display = "";
+			}
 			for (var mlk in mLabelSet) if (mLabelEls[mlk]) mLabelEls[mlk].textContent = mLabelSet[mlk];
 			mB.total.classList.remove("tdb-mv-balance");
 
-			if (tab === "all") {
-				miniEl.title = error ? String(error) : "全部会话汇总（" + rangeLabel + "）· 点击展开";
-				var aTot = data && data.totals ? data.totals : null;
-				if (aTot) {
-					var ab = (aTot.uncached || 0) + (aTot.cacheRead || 0) + (aTot.cacheWrite || 0);
-					var ahit = ab > 0 ? ((aTot.cacheRead || 0) / ab) * 100 : null;
-					mB.total.textContent = fmt(overall(aTot));
-					mB.total.parentElement.title = "总消耗(整体)";
-					mB.in.textContent = fmt(aTot.uncached);
-					mB.in.parentElement.title = "输入 · uncached";
-					mB.out.textContent = fmt(aTot.output);
-					mB.out.parentElement.title = "输出";
-					mB.cr.textContent = fmt(aTot.cacheRead);
-					mB.cr.parentElement.title = "缓存读取";
-					mB.hit.textContent = ahit === null ? "—" : ahit.toFixed(0) + "%";
-					mB.hit.parentElement.title = ahit === null ? "总命中率" : "总命中率 " + ahit.toFixed(1) + "%";
-					var aCalls = typeof aTot.calls === "number" ? aTot.calls : null;
-					mB.calls.textContent = aCalls === null ? "—" : String(aCalls);
-					mB.calls.parentElement.title = aCalls === null ? "数据源未上报调用次数" : "API 调用次数(每次模型回复计 1 次)";
+			if (tab === "summary") {
+				miniEl.title = error ? String(error) : "跨窗口汇总 · 点击展开";
+				var wt = data && data.windowTotals ? data.windowTotals : null;
+				if (wt) {
+					mB.total.textContent = fmt(overall(wt.all));
+					mB.total.parentElement.title = "累计总消耗(整体)";
+					mB.in.textContent = fmt(overall(wt.d30));
+					mB.in.parentElement.title = "最近一月(滚动 30 天)";
+					mB.out.textContent = fmt(overall(wt.d7));
+					mB.out.parentElement.title = "最近一周(滚动 7 天)";
+					mB.cr.textContent = fmt(overall(wt.d1));
+					mB.cr.parentElement.title = "最近一日(滚动 24 小时)";
+					mB.hit.textContent = "—";
+					mB.hit.parentElement.title = "";
+					mB.calls.textContent = "—";
+					mB.calls.parentElement.title = "";
 				} else {
 					for (var mk in mB) mB[mk].textContent = "—";
 				}
@@ -1482,29 +1682,6 @@ window.__ModuleLoader__.load({
 					var sCalls = typeof sess.totals.calls === "number" ? sess.totals.calls : null;
 					mB.calls.textContent = sCalls === null ? "—" : String(sCalls);
 					mB.calls.parentElement.title = sCalls === null ? "数据源未上报调用次数" : "API 调用次数(每次模型回复计 1 次)";
-				} else {
-					for (var mk in mB) mB[mk].textContent = "—";
-				}
-			} else if (tab === "model") {
-				miniEl.title = error ? String(error) : "主力模型（" + rangeLabel + "）· 点击展开";
-				var mods = data && Array.isArray(data.models) ? data.models : [];
-				if (mods.length > 0 && mods[0].totals) {
-					var mT = mods[0].totals;
-					var mb = (mT.uncached || 0) + (mT.cacheRead || 0) + (mT.cacheWrite || 0);
-					var mhit = mb > 0 ? ((mT.cacheRead || 0) / mb) * 100 : null;
-					mB.total.textContent = fmt(overall(mT));
-					mB.total.parentElement.title = "总消耗(整体)";
-					mB.in.textContent = fmt(mT.uncached);
-					mB.in.parentElement.title = "输入 · uncached";
-					mB.out.textContent = fmt(mT.output);
-					mB.out.parentElement.title = "输出";
-					mB.cr.textContent = fmt(mT.cacheRead);
-					mB.cr.parentElement.title = "缓存读取";
-					mB.hit.textContent = mhit === null ? "—" : mhit.toFixed(0) + "%";
-					mB.hit.parentElement.title = mhit === null ? "总命中率" : "总命中率 " + mhit.toFixed(1) + "%";
-					var mCalls = typeof mT.calls === "number" ? mT.calls : null;
-					mB.calls.textContent = mCalls === null ? "—" : String(mCalls);
-					mB.calls.parentElement.title = mCalls === null ? "数据源未上报调用次数" : "API 调用次数(每次模型回复计 1 次)";
 				} else {
 					for (var mk in mB) mB[mk].textContent = "—";
 				}
@@ -1794,18 +1971,9 @@ window.__ModuleLoader__.load({
 			var onVis = function () { if (!document.hidden) refreshNow(); };
 			document.addEventListener("visibilitychange", onVis);
 
-			// 图表指标选择器：按面板切换第一个图表的数据源。
+			// 图表指标选择器：会话面板第一个图表的数据源切换。
 			// payload 已携带每个趋势点的所有指标，因此切换
 			// 只是纯粹的重新渲染，无需重新请求。
-			for (var ab = 0; ab < aPickBtns.length; ab++) {
-				aPickBtns[ab].addEventListener("click", function () {
-					var m = this.getAttribute("data-metric");
-					if (m === aMetric) return;
-					aMetric = m;
-					writeStore("ametric", aMetric);
-					render();
-				});
-			}
 			for (var sb = 0; sb < sPickBtns.length; sb++) {
 				sPickBtns[sb].addEventListener("click", function () {
 					var m = this.getAttribute("data-metric");
@@ -1815,8 +1983,18 @@ window.__ModuleLoader__.load({
 					render();
 				});
 			}
+			// 每日柱状图的 堆叠(按模型)/总量 视图切换；纯客户端重渲染。
+			for (var bb = 0; bb < barBtns.length; bb++) {
+				barBtns[bb].addEventListener("click", function () {
+					var m = this.getAttribute("data-bmode");
+					if (m === barMode) return;
+					barMode = m;
+					writeStore("barmode", barMode);
+					render();
+				});
+			}
 
-			// 键盘快捷键：[ 折叠，] 展开，r 刷新，t 循环标签页（总消耗→会话→模型→DeepSeek），0 总消耗标签，f 跟随活动会话，1..9 选择会话。
+			// 键盘快捷键：[ 折叠，] 展开，r 刷新，t 循环标签页（汇总→会话→DeepSeek），0 汇总标签，f 跟随活动会话，1..9 选择会话。
 			function onKey(ev) {
 				if (ev.defaultPrevented) return;
 				var t = ev.target;
@@ -1842,8 +2020,8 @@ window.__ModuleLoader__.load({
 					ev.preventDefault();
 				}
 				else if (ev.key === "0") {
-					// 切换到总消耗（聚合）标签页。
-					tab = "all";
+					// 切换到汇总（默认）标签页。
+					tab = "summary";
 					writeStore("tab", tab);
 					render();
 					ev.preventDefault();

@@ -7,3 +7,6 @@ _temp_diff.txt
 
 # Local runtime artifacts (never part of the plugin source).
 *.log
+
+# Local selftest junction -> harness checkout node_modules (selftest module resolution).
+node_modules/
