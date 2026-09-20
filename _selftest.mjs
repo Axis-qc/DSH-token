@@ -244,7 +244,7 @@ console.log("[2] server half");
 		assert.equal(s.context.projectedTokens, 5900, "projectedTokens always mirrors pressureTokens (occupancy computable)");
 
 		// ── raw per-step fold still dedups exactly as before ──
-		const { newSessionState, foldEvent, flushLastSample, rangeToMs, aggregateWindow, aggregateWindowTotals, aggregateModels, sliceSession, flattenContentText } = module._internal;
+		const { newSessionState, foldEvent, flushLastSample, rangeToMs, aggregateWindow, aggregateWindowTotals, aggregateModels, aggregateModelWindowSeries, sliceSession, flattenContentText } = module._internal;
 		assert.equal(flattenContentText([{ type: "text", text: "  a\n b " }, { type: "text", text: "c" }], 60), "a b c", "flatten joins text blocks");
 		assert.equal(flattenContentText([{ type: "text", text: "abcdef" }], 2), "ab…", "flatten caps length");
 		const raw = newSessionState("raw");
@@ -282,6 +282,22 @@ console.log("[2] server half");
 		};
 		assert.deepEqual(mbSum("demo-provider|demo-model-1"), { in: 3200, cr: 1350, cw: 450, out: 1050 }, "model-1 hour buckets");
 		assert.deepEqual(mbSum("demo-provider|demo-model-2"), { in: 3300, cr: 2200, cw: 400, out: 1500 }, "model-2 hour buckets");
+		// Per-model MINUTE buckets carry the same deltas. 1h range reads these
+		// (not the hour buckets), otherwise an hour's consumption collapses into
+		// a single whole-hour point and the stacked bar chart shows one bar.
+		const mmSum = (key) => {
+			const bins = raw.modelMinuteBins.get(key) || new Map();
+			let sum = { in: 0, cr: 0, cw: 0, out: 0, calls: 0 };
+			for (const b of bins.values()) {
+				sum.in += b.in; sum.cr += b.cr; sum.cw += b.cw; sum.out += b.out; sum.calls += b.calls;
+			}
+			return sum;
+		};
+		assert.deepEqual(mmSum("demo-provider|demo-model-1"), { in: 3200, cr: 1350, cw: 450, out: 1050, calls: 3 }, "model-1 minute buckets mirror the hour buckets");
+		assert.deepEqual(mmSum("demo-provider|demo-model-2"), { in: 3300, cr: 2200, cw: 400, out: 1500, calls: 1 }, "model-2 minute buckets mirror the hour buckets");
+		// Minute buckets must reconcile slot-by-slot with the global minuteBins.
+		const globalMinuteIn = [...raw.minuteBins.values()].reduce((a, b) => a + b.in, 0);
+		assert.equal(mmSum("demo-provider|demo-model-1").in + mmSum("demo-provider|demo-model-2").in, globalMinuteIn, "per-model minute input sums to the global minute buckets");
 		// Missing message.source → attributed to 未知|未知 so totals still reconcile.
 		const ns = newSessionState("ns");
 		foldEvent(ns, { type: "assistant/message", time: T0 + 300, data: { turn: 9, step: 1, usage: { inputTokens: 7, cacheReadTokens: 0, cacheWriteTokens: 0, outputTokens: 3 } } });
@@ -450,6 +466,36 @@ console.log("[2] server half");
 		// 30d on the same state still uses hour bins → minuteBins ignored.
 		assert.equal(aggregateWindow(mmap2, rangeToMs("30d")).totals.output, 0, "day/hour windows ignore minute bins");
 		assert.equal(sliceSession(mn, agg1h.start, agg1h.end, "minute").totals.output, 3, "sliceSession minute mode sums minute bins");
+		// ── 1h range: per-model series + model details must be minute-granular too ──
+		// Regression: aggregateModelWindowSeries used to read modelHourBins
+		// unconditionally, so a whole hour of consumption landed in the single
+		// whole-hour slot (stacked chart = one bar) and aggregateModels dropped
+		// that leading partial hour entirely, under-reporting model totals.
+		const mh = newSessionState("mh");
+		// One hour bucket covering the whole window, plus per-minute buckets for
+		// only part of it: the hour bucket must be ignored on the 1h range.
+		const hourSlot = Math.floor(Date.now() / HOUR) * HOUR;
+		mh.modelHourBins.set("prov-z|m-z", new Map([[hourSlot, { in: 9999, cr: 0, cw: 0, out: 999, calls: 9 }]]));
+		const mMin = (ageMs) => Math.floor((Date.now() - ageMs) / M) * M;
+		mh.modelMinuteBins.set("prov-z|m-z", new Map([
+			[mMin(10 * M), { in: 100, cr: 20, cw: 0, out: 5, calls: 2 }],
+			[mMin(40 * M), { in: 200, cr: 30, cw: 0, out: 7, calls: 3 }],
+			[mMin(90 * M), { in: 400, cr: 0, cw: 0, out: 9, calls: 4 }], // outside 1h
+		]));
+		const mmap3 = new Map([["mh", mh]]);
+		const agg1h3 = aggregateWindow(mmap3, rangeToMs("1h"));
+		const mseries1h = aggregateModelWindowSeries(mmap3, agg1h3.start, agg1h3.end, "minute");
+		assert.equal(mseries1h.length, 1, "1h model series exposes the model");
+		const nonZero = mseries1h[0].series.filter((p) => p.in + p.cr + p.cw + p.out > 0);
+		assert.equal(nonZero.length, 2, `1h model series spreads across two minute slots (got ${nonZero.length})`);
+		assert.equal(mseries1h[0].series.reduce((a, p) => a + p.in, 0), 300, "1h model series takes minute buckets, ignores the hour bucket");
+		assert.equal(mseries1h[0].series.reduce((a, p) => a + p.calls, 0), 5, "1h model series carries per-minute call counts");
+		const mdet1h = aggregateModels(mmap3, agg1h3.start, agg1h3.end, "minute");
+		assert.equal(mdet1h.length, 1, "1h model details expose the model");
+		assert.deepEqual(mdet1h[0].totals, { uncached: 300, cacheRead: 50, cacheWrite: 0, output: 12, calls: 5 }, "1h model details read minute buckets and match the window");
+		// The same state on an hour-granular window still reads hour buckets.
+		const mdetAll = aggregateModels(mmap3, 0, Date.now(), "hour");
+		assert.deepEqual(mdetAll[0].totals, { uncached: 9999, cacheRead: 0, cacheWrite: 0, output: 999, calls: 9 }, "hour-granular windows keep reading hour buckets");
 		ok("foldEvent replaces same (turn, step), continuous hour series + range slicing + per-model aggregation + 1h/minute granularity work");
 	} catch (err) {
 		bad("server logic", err);

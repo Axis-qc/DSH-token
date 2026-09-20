@@ -711,7 +711,7 @@ window.__ModuleLoader__.load({
 				"        <select class=\"tdb-select\" aria-label=\"选择会话\"></select>",
 				"      </div>",
 				"      <div class=\"tdb-grid\">",
-				"        <div class=\"tdb-cell tdb-c-in\"><b class=\"tdb-v-in\">—</b><span><i class=\"tdb-i\"></i>输入 · uncached</span></div>",
+				"        <div class=\"tdb-cell tdb-c-in\"><b class=\"tdb-v-in\">—</b><span><i class=\"tdb-i\"></i>输入 · 未缓存</span></div>",
 				"        <div class=\"tdb-cell tdb-c-out\"><b class=\"tdb-v-out\">—</b><span><i class=\"tdb-i\"></i>输出</span></div>",
 				"        <div class=\"tdb-cell tdb-c-cr\"><b class=\"tdb-v-cr\">—</b><span><i class=\"tdb-i\"></i>缓存读取</span></div>",
 				"        <div class=\"tdb-cell tdb-c-hit\"><b class=\"tdb-v-hit\">—</b><span><i class=\"tdb-i\"></i>缓存命中率</span></div>",
@@ -856,7 +856,7 @@ window.__ModuleLoader__.load({
 			 *  保持两个面板的第一个图表行为一致。 */
 			var METRIC_DEFS = {
 				out: { label: "输出", color: "var(--tdb-accent-out)", unit: "tok", pick: function (s) { return s.out; } },
-				in: { label: "输入 · uncached", color: "var(--tdb-accent-in)", unit: "tok", pick: function (s) { return s.in; } },
+				in: { label: "输入 · 未缓存", color: "var(--tdb-accent-in)", unit: "tok", pick: function (s) { return s.in; } },
 				cr: { label: "缓存读取", color: "var(--tdb-accent-cr)", unit: "tok", pick: function (s) { return s.cr; } },
 				total: { label: "总消耗(整体)", color: "var(--tdb-accent-ctx)", unit: "tok", pick: function (s) { return s.in + s.cr + (s.cw || 0) + s.out; } },
 				calls: { label: "API 调用次数", color: "var(--tdb-accent-calls)", unit: "次", pick: function (s) { return typeof s.calls === "number" ? s.calls : 0; } },
@@ -1161,7 +1161,7 @@ window.__ModuleLoader__.load({
 							'<span class="tdb-mtotal" title="总消耗（输入 + 缓存读写 + 输出）">' + fmt(total) + ' tok</span>' +
 							'<span class="tdb-mpct">' + share.toFixed(1) + '%</span></div>' +
 							'<div class="tdb-mstats">' +
-							'<span class="tdb-mstat tdb-ms-in" title="输入 · uncached"><i>入</i><b>' + fmt(t.uncached) + '</b></span>' +
+							'<span class="tdb-mstat tdb-ms-in" title="输入 · 未缓存"><i>入</i><b>' + fmt(t.uncached) + '</b></span>' +
 							'<span class="tdb-mstat tdb-ms-cr" title="缓存读取"><i>读</i><b>' + fmt(t.cacheRead) + '</b></span>' +
 							'<span class="tdb-mstat tdb-ms-cw" title="' + cacheWriteTip + '"><i>写</i><b>' + cacheWrite + '</b></span>' +
 							'<span class="tdb-mstat tdb-ms-out" title="输出"><i>出</i><b>' + fmt(t.output) + '</b></span>' +
@@ -1580,7 +1580,7 @@ window.__ModuleLoader__.load({
 					fUpdated.textContent = wT
 						? "累计 " + fmt(overall(wT.all)) + " · 1月 " + fmt(overall(wT.d30)) + " · 1周 " + fmt(overall(wT.d7)) + " · 1日 " + fmt(overall(wT.d1)) + " tok"
 						: "汇总数据加载中";
-					fUpdated.title = "口径：整体消耗 = uncached 输入 + 缓存读写 + 输出；窗口随当前时刻滚动";
+					fUpdated.title = "口径：整体消耗 = 未缓存输入 + 缓存读写 + 输出；窗口随当前时刻滚动";
 				} else if (tab === "deepseek") {
 					// DeepSeek 标签页头部：官方账户余额（+ 配置状态）。
 					var db = data && data.balance ? data.balance : null;
@@ -1620,7 +1620,7 @@ window.__ModuleLoader__.load({
 				updateSelect();
 
 				// 迷你胶囊（折叠态）：跟随当前活动标签页与时间范围显示对应汇总。
-			// summary/汇总：四个滚动窗口总量；session/会话：当前选中会话；
+			// summary/汇总：当前所选时间范围的窗口汇总；session/会话：当前选中会话；
 			// deepseek/DeepSeek：官方余额。
 			miniEl.classList.toggle("err", !!error);
 			var rangeLabel = range === "all" ? "全部" : range === "30d" ? "1月" : range === "7d" ? "1周" : range === "1d" ? "1天" : "1小时";
@@ -1631,35 +1631,35 @@ window.__ModuleLoader__.load({
 			// 胶囊标签：deepseek 余额模式下切换为余额相关标签，其余标签页恢复 token 标签。
 			var mTokenLabels = { total: "总计", in: "输入", out: "输出", cr: "缓存", hit: "命中", calls: "调用" };
 			var mBalanceLabels = { total: "余额", in: "赠送", out: "充值", cr: "1h耗", hit: "24h耗", calls: "累计耗" };
-			var mLabelSet = tab === "deepseek" ? mBalanceLabels : mTokenLabels;
-			// 汇总模式复用四个胶囊显示 累计/1月/1周/1日，命中率/调用两个胶囊隐藏。
-			if (tab === "summary") {
-				mLabelSet = { total: "累计", in: "1月", out: "1周", cr: "1日" };
-				mLabelEls.hit.parentElement.style.display = "none";
-				mLabelEls.calls.parentElement.style.display = "none";
-			} else {
-				mLabelEls.hit.parentElement.style.display = "";
-				mLabelEls.calls.parentElement.style.display = "";
-			}
+			// 汇总页胶囊显示当前所选时间范围的窗口汇总（选 1天 = 最近一天，
+			// 选 1月 = 最近一月），不再是四个滚动窗口的累计对比。
+			var mSummaryLabels = { total: rangeLabel, in: "输入", out: "输出", cr: "缓存", hit: "命中", calls: "调用" };
+			var mLabelSet = tab === "deepseek" ? mBalanceLabels : tab === "summary" ? mSummaryLabels : mTokenLabels;
+			// 三个视图都显示六个胶囊：命中率与调用次数在汇总页同样有意义。
+			mLabelEls.hit.parentElement.style.display = "";
+			mLabelEls.calls.parentElement.style.display = "";
 			for (var mlk in mLabelSet) if (mLabelEls[mlk]) mLabelEls[mlk].textContent = mLabelSet[mlk];
 			mB.total.classList.remove("tdb-mv-balance");
 
 			if (tab === "summary") {
-				miniEl.title = error ? String(error) : "跨窗口汇总 · 点击展开";
-				var wt = data && data.windowTotals ? data.windowTotals : null;
-				if (wt) {
-					mB.total.textContent = fmt(overall(wt.all));
-					mB.total.parentElement.title = "累计总消耗(整体)";
-					mB.in.textContent = fmt(overall(wt.d30));
-					mB.in.parentElement.title = "最近一月(滚动 30 天)";
-					mB.out.textContent = fmt(overall(wt.d7));
-					mB.out.parentElement.title = "最近一周(滚动 7 天)";
-					mB.cr.textContent = fmt(overall(wt.d1));
-					mB.cr.parentElement.title = "最近一日(滚动 24 小时)";
-					mB.hit.textContent = "—";
-					mB.hit.parentElement.title = "";
-					mB.calls.textContent = "—";
-					mB.calls.parentElement.title = "";
+				miniEl.title = error ? String(error) : "当前范围汇总（" + rangeLabel + "）· 点击展开";
+				var st = data && data.totals ? data.totals : null;
+				if (st) {
+					var stBilled = (st.uncached || 0) + (st.cacheRead || 0) + (st.cacheWrite || 0);
+					var stHit = stBilled > 0 ? ((st.cacheRead || 0) / stBilled) * 100 : null;
+					mB.total.textContent = fmt(overall(st));
+					mB.total.parentElement.title = "当前范围总消耗(整体) · " + rangeLabel;
+					mB.in.textContent = fmt(st.uncached);
+					mB.in.parentElement.title = "输入 · 未缓存";
+					mB.out.textContent = fmt(st.output);
+					mB.out.parentElement.title = "输出";
+					mB.cr.textContent = fmt(st.cacheRead);
+					mB.cr.parentElement.title = "缓存读取";
+					mB.hit.textContent = stHit === null ? "—" : stHit.toFixed(0) + "%";
+					mB.hit.parentElement.title = stHit === null ? "总命中率" : "总命中率 " + stHit.toFixed(1) + "%";
+					var stCalls = typeof st.calls === "number" ? st.calls : null;
+					mB.calls.textContent = stCalls === null ? "—" : String(stCalls);
+					mB.calls.parentElement.title = stCalls === null ? "数据源未上报调用次数" : "API 调用次数(每次模型回复计 1 次)";
 				} else {
 					for (var mk in mB) mB[mk].textContent = "—";
 				}
@@ -1672,7 +1672,7 @@ window.__ModuleLoader__.load({
 					mB.total.textContent = fmt(overall(sess.totals));
 					mB.total.parentElement.title = "总消耗(整体)";
 					mB.in.textContent = fmt(sess.totals.uncached);
-					mB.in.parentElement.title = "输入 · uncached";
+					mB.in.parentElement.title = "输入 · 未缓存";
 					mB.out.textContent = fmt(sess.totals.output);
 					mB.out.parentElement.title = "输出";
 					mB.cr.textContent = fmt(sess.totals.cacheRead);

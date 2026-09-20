@@ -23,6 +23,7 @@ export interface Config {
  * 字段与每条 `assistant/message` 的 tokenUsage 投影保持一致。
  */
 export interface TokenDashboardTotals {
+  /** 未缓存（uncached）输入 token：即未被缓存命中、按原价计入的那部分输入。 */
   uncached: number;
   cacheRead: number;
   cacheWrite: number;
@@ -31,16 +32,17 @@ export interface TokenDashboardTotals {
   calls: number;
 }
 
-/** 一个按小时的用量样本（把一小时内各步的增量聚合在一起）。 */
+/** 一个用量样本（把桶内各步的增量聚合在一起）。桶粒度随 range 变化：
+ *  1h 为分钟、1d/7d 为小时、30d/全部 为天。 */
 export interface TokenDashboardHourSample {
   t: number;
   in: number;
   cr: number;
   cw: number;
   out: number;
-  /** 该小时内的 API 调用次数。 */
+  /** 该时段内的 API 调用次数。 */
   calls: number;
-  /** 该小时计费输入中缓存读取的占比，0..1（仅全局序列有此字段）。 */
+  /** 该时段计费输入中缓存读取的占比，0..1（仅全局序列有此字段）。 */
   hitPct?: number;
 }
 
@@ -69,7 +71,7 @@ export interface TokenDashboardModel {
   totals: TokenDashboardTotals;
   /** 该模型的缓存命中率，百分比 0-100；无计费输入时为 0。 */
   hitPct: number;
-  /** 占窗口总消耗（uncached 输入 + 输出）的比例，百分比 0-100。 */
+  /** 占窗口总消耗（未缓存输入 + 缓存读取 + 缓存写入 + 输出）的比例，百分比 0-100。 */
   sharePct: number;
 }
 
@@ -133,7 +135,9 @@ export interface TokenDashboardPayload {
     d1: TokenDashboardTotals;
   };
   /** 汇总页堆叠柱状图用：与 `series` 同时间网格的每模型时段序列。
-   *  `key` 为 "provider|model"，`series` 的时间戳与全局 `series` 一一对应。 */
+   *  `key` 为 "provider|model"，`series` 的时间戳与全局 `series` 一一对应。
+   *  粒度与全局 `series` 一致：range=1h 时按分钟（取自每模型分钟桶）、
+   *  range=30d|all 时按天、其余按小时。 */
   modelSeries: Array<{
     key: string;
     series: Array<{ t: number; in: number; cr: number; cw: number; out: number; calls: number }>;

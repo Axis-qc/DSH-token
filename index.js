@@ -141,6 +141,13 @@ function newSessionState(id) {
 		 *  `data.message.source.provider/model` 的 `assistant/message`，这样
 		 *  模型 tab 就能按相同的时间范围切分各模型的消耗。 */
 		modelHourBins: new Map(),
+		/** 每个模型的每分钟增量桶：形状同 modelHourBins，但槽位是
+		 *  分钟起始时刻。1h 范围下全局序列已按分钟渲染，模型维度的
+		 *  序列与明细也必须同粒度，否则一小时的消耗会被整点小时桶
+		 *  压成一个点（堆叠柱状图只出现一根柱），模型明细在窗口
+		 *  中点还会漏掉首个不完整小时。滚动缓冲的修剪规则与
+		 *  minuteBins 一致（约 25 小时）。 */
+		modelMinuteBins: new Map(),
 		stats: null,
 		context: null,
 		updatedAt: null,
@@ -238,6 +245,31 @@ function flushLastSample(state, t, alsoSeries) {
 			const cutoff = Date.now() - 25 * 3600000;
 			for (const k of state.minuteBins.keys()) {
 				if (k < cutoff) state.minuteBins.delete(k);
+			}
+		}
+		// 同一个增量也放进该模型的分钟桶：1h 范围下模型堆叠柱状图与
+		// 模型明细都按分钟切分，与全局序列同粒度。修剪规则同上。
+		const mkMin = last.modelKey;
+		if (mkMin) {
+			let mmb = state.modelMinuteBins.get(mkMin);
+			if (!mmb) {
+				mmb = new Map();
+				state.modelMinuteBins.set(mkMin, mmb);
+			}
+			let mmin = mmb.get(mk2);
+			if (!mmin) {
+				mmin = { in: 0, cr: 0, cw: 0, out: 0, calls: 0 };
+				mmb.set(mk2, mmin);
+			}
+			mmin.in += dIn;
+			mmin.cr += dCr;
+			mmin.cw += dCw;
+			mmin.out += dOut;
+			if (mmb.size > 1500) {
+				const cutoffMin = Date.now() - 25 * 3600000;
+				for (const k of mmb.keys()) {
+					if (k < cutoffMin) mmb.delete(k);
+				}
 			}
 		}
 	}
@@ -361,6 +393,19 @@ function foldEvent(state, event) {
 				modelMap.set(hourSlot, modelBucket);
 			}
 			modelBucket.calls += 1;
+			// 同一计数的分钟粒度版本：保持模型分钟桶的 calls 与
+			// 全局 minuteBins 对账，1h 范围的模型明细才能显示调用次数。
+			let modelMinuteMap = state.modelMinuteBins.get(modelKey);
+			if (!modelMinuteMap) {
+				modelMinuteMap = new Map();
+				state.modelMinuteBins.set(modelKey, modelMinuteMap);
+			}
+			let modelMinuteBucket = modelMinuteMap.get(minuteSlot);
+			if (!modelMinuteBucket) {
+				modelMinuteBucket = { in: 0, cr: 0, cw: 0, out: 0, calls: 0 };
+				modelMinuteMap.set(minuteSlot, modelMinuteBucket);
+			}
+			modelMinuteBucket.calls += 1;
 		}
 		if (typeof event.time === "number") state.updatedAt = event.time;
 		return;
@@ -699,6 +744,9 @@ function aggregateWindow(sessions, rangeMs) {
  */
 function aggregateModelWindowSeries(sessions, start, endMs, mode) {
 	const slotMs = mode === "minute" ? MINUTE_MS : mode === "day" ? DAY_MS : HOUR_MS;
+	// 分钟粒度必须读每模型的分钟桶：模型小时桶会把一整小时的消耗
+	// 压进单个整点槽，1h 范围的堆叠柱状图因此只剩一根柱。
+	const useMinuteBins = mode === "minute";
 	const startSlot = Math.floor(start / slotMs) * slotMs;
 	const endSlot = Math.floor(endMs / slotMs) * slotMs;
 	const slotCount = Math.floor((endSlot - startSlot) / slotMs) + 1;
@@ -707,7 +755,8 @@ function aggregateModelWindowSeries(sessions, start, endMs, mode) {
 	/** mk → Array<slot 桶> */
 	const perModel = new Map();
 	for (const state of sessions.values()) {
-		for (const [mk, bins] of state.modelHourBins) {
+		const sourceBins = useMinuteBins ? state.modelMinuteBins : state.modelHourBins;
+		for (const [mk, bins] of sourceBins) {
 			for (const [hk, b] of bins) {
 				// 末槽为不完整槽：窗口终点落在槽中间时，末槽仍延伸到
 				// endSlot + slotMs（与 sliceSession 的聚合语义一致）。
@@ -735,23 +784,34 @@ function aggregateModelWindowSeries(sessions, start, endMs, mode) {
 }
 
 /**
- * 对窗口内的每个模型消耗做聚合：累加每个会话的按模型小时桶。
+ * 对窗口内的每个模型消耗做聚合：累加每个会话的按模型桶。
  * 模型身份由每条 assistant/message 携带的 provider/model 对构成
  * （未知对回退到 未知|未知）。占比基于模型的 总消耗 计算
  * （API 整体消耗：uncached 输入 + 缓存读取 + 缓存写入 + 输出），
  * 这与图表使用的整体消耗定义一致。
+ * 桶粒度由 mode 决定：mode 为 "minute"（1h 范围）时读每模型分钟桶，
+ * 否则读每模型小时桶。这两种粒度必须与 aggregateWindow 选的粒度
+ * 一致，否则模型明细会在 1h 窗口下整块丢掉窗口首个不完整小时。
  * 不提供货币估算：token 数来自会话日志是精确的，金额则不是
  * （参见 DeepSeek 余额 tab）。
  * @param {Map<string, ReturnType<typeof newSessionState>>} sessions
  * @param {number} start - 窗口起点（ms 时间戳）。
  * @param {number} endMs - 窗口终点（ms 时间戳，通常为当前时刻）。
+ * @param {"hour" | "minute" | "day"} [mode] - 桶粒度（默认 "hour"）。
  * @returns {Array<{ provider: string, model: string, totals: { uncached: number, cacheRead: number, cacheWrite: number, output: number }, hitPct: number, sharePct: number }>}
  *   按 总消耗（整体，含缓存）降序排列。
  */
-function aggregateModels(sessions, start, endMs) {
+function aggregateModels(sessions, start, endMs, mode) {
+	const useMinuteBins = mode === "minute";
+	// 分钟粒度按分钟槽对齐窗口，与 sliceSession 的语义一致（窗口起点
+	// 所在的那一分钟整槽都算在窗口内），这样 1h 窗口下模型明细与
+	// 全局 totals 必然对账。小时粒度保持原有的逐桶比较方式不变。
+	const startSlot = Math.floor(start / MINUTE_MS) * MINUTE_MS;
+	const endSlot = Math.floor(endMs / MINUTE_MS) * MINUTE_MS + MINUTE_MS;
 	const picked = new Map();
 	for (const state of sessions.values()) {
-		for (const [mk, bins] of state.modelHourBins) {
+		const sourceBins = useMinuteBins ? state.modelMinuteBins : state.modelHourBins;
+		for (const [mk, bins] of sourceBins) {
 			let rec = picked.get(mk);
 			if (!rec) {
 				const sep = mk.indexOf("|");
@@ -767,7 +827,9 @@ function aggregateModels(sessions, start, endMs) {
 				picked.set(mk, rec);
 			}
 			for (const [hk, b] of bins) {
-				if (hk < start || hk > endMs) continue;
+				if (useMinuteBins) {
+					if (hk < startSlot || hk >= endSlot) continue;
+				} else if (hk < start || hk > endMs) continue;
 				rec.uncached += b.in;
 				rec.cacheRead += b.cr;
 				rec.cacheWrite += b.cw;
@@ -1195,7 +1257,7 @@ export function apply(ctx, config = {}) {
 			// 窗口内按模型的消耗（仅精确 token 数——
 			// 已移除货币估算：价格会变动且无法查询，
 			// 所以金额只会是过时的猜测）。
-			models: aggregateModels(sessions, agg.start, agg.end),
+			models: aggregateModels(sessions, agg.start, agg.end, agg.mode),
 			// 「汇总」标签页用：累计/最近一月/最近一周/最近一日
 			// 四个滚动窗口的总量（独立于所选 range，始终返回完整对比）。
 			windowTotals: aggregateWindowTotals(sessions),
