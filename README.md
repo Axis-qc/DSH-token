@@ -79,13 +79,13 @@ restart
 
 - **汇总（默认）** —— 跨窗口汇总与模型明细合一的视图：
   - **累计 / 最近一月 / 最近一周 / 最近一日** 四张滚动窗口卡片（滚动窗口：now-30天 / now-7天 / now-24小时 至今，随当前时刻滚动，与上方所选时间范围无关），悬停可看各窗口的完整分项。
-  - **每日总消耗柱状图**（1月/全部范围按天、1周/1天按小时、1小时按分钟）：默认**按模型堆叠**——窗口内整体消耗前 5 的模型各占一段配色（其余并入「其他」），悬停显示该时段每个模型的消耗与全局分项；可切换为**总量**单色柱。两种模式都附带与柱同网格的图例/说明。
-  - **模型明细（按提供商分组）**：原「模型」页整体并入——每个提供商一段可展开/收起的分组摘要（组名 + 组内模型数 + 组内总消耗 + 占窗口比例），组内每个「提供商/模型」组合以紧凑行展示，保留输入（未缓存）/ 缓存读取 / 缓存写入 / 输出、API 调用次数、总消耗、缓存命中率和占比；顶部提供**模型/提供商搜索**与**提供商筛选下拉**（筛选、搜索词和分组展开状态会记住）。提供商/模型组合读取自每条 `assistant/message` 的 `data.message.source`（缺失时归入 未知|未知），混用多模型的对话能把每个 token 都归因到真正生成它的模型。模型明细与柱状图使用与全局相同的桶粒度：1小时范围按分钟切分，因此该范围下模型消耗与全局汇总始终对账。
+  - **每日总消耗柱状图**（1月/全部范围按天、1周/1天按小时、12小时/1小时按分钟）：默认**按模型堆叠**——窗口内整体消耗前 5 的模型各占一段配色（其余并入「其他」），悬停显示该时段每个模型的消耗与全局分项；可切换为**总量**单色柱。两种模式都附带与柱同网格的图例/说明。槽位极多时（12小时逐分钟约 721 格）柱间距自动归零，避免 1px 间隙吃掉整个容器宽度。
+  - **模型明细（按提供商分组）**：原「模型」页整体并入——每个提供商一段可展开/收起的分组摘要（组名 + 组内模型数 + 组内总消耗 + 占窗口比例），组内每个「提供商/模型」组合以紧凑行展示，保留输入（未缓存）/ 缓存读取 / 缓存写入 / 输出、API 调用次数、总消耗、缓存命中率和占比；顶部提供**模型/提供商搜索**与**提供商筛选下拉**（筛选、搜索词和分组展开状态会记住）。提供商/模型组合读取自每条 `assistant/message` 的 `data.message.source`（缺失时归入 未知|未知），混用多模型的对话能把每个 token 都归因到真正生成它的模型。模型明细与柱状图使用与全局相同的桶粒度，且窗口边界一律按槽位对齐（窗口起点所在的不完整时段整段计入），因此**任何范围下模型明细合计都与全局汇总逐项对账**（12小时/1小时按分钟、1天/1周按小时、1月/全部按天）。
   - 对于会上报实际服务模型的路由型提供商（Auto / 路由类提供商，例如火山方舟 ark），显示的是来自 `source.replayState.response.responseModel` 的**服务端实际路由模型**（例如 `kimi-k3`），而非请求时配置的名称 —— 当没有上报路由模型名时，回退为 `source.model`。
   - 模型明细**只显示精确的 token 计数**，不做金额估算。模型价格会随时间变化，而且（对 opencode-go 等）无法通过 API 查询，因此基于过期价格快照推算出的任何「成本」都只是误导性的猜测。真实金额请查看各提供商自己的控制台（或下面的 DeepSeek tab，它反映的是**官方**余额）。
 - **会话** —— 针对单个会话的数值卡片与图表：跟随模式（`⚡ 跟随进行中的会话`，按键 `F`）会自动切换到最近产生事件的那个会话（即 `payload.activeId`，也就是你正在 DSH 中对话的那一个），也可以从下拉框中指定某个会话。此视图显示该会话自己的命中率、上下文占用、API 调用次数，以及两个图表（第一个可切换数据源：输出 / 输入 / 缓存读取 / 总消耗 / 调用次数）。
-- **DeepSeek（官方余额）** —— 显示从 `GET https://api.deepseek.com/user/balance` 拉取的 DeepSeek 官方账户余额（[文档](https://api-docs.deepseek.com/api/get-user-balance/)）：按币种显示 总余额 / 赠送余额 / 充值余额，加上账户可用状态、一条**余额随时间变化曲线**，以及 近1小时 / 近24小时 / 近7天 / 自监控以来 四个窗口的**余额下降量**。服务端在启动时立即拉取一次，之后固定每 30 分钟拉取一次，且对齐本地时间的整点与半点（`:00` / `:30`），并把每个成功取到的值追加到一份**持久化到磁盘**的历史中（`balanceFile`，默认 `$DSH_HOME/dsh-token-dashboard-balance.json`，最多 1,000,000 条样本）。启动和每次成功采样前都会合并磁盘与内存历史，再以原子方式保存，因此重启或采样进程变化不会清空已有记录。官方接口只提供当前余额，历史曲线只能依赖插件从首次采样开始本地累积，无法从接口回填更早数据。
-  下降量 = 窗口内相邻余额采样之间**余额下降的累计**（余额上升的采样段——充值/赠送到账——记 0，窗口边界跨采样段时按时间占比折算）——这是唯一可得的真实金额信号（token 日志里有用量，但价格可自由浮动，所以用量比乘上一个猜测价格更诚实）。因此消耗**永不为负**，且 近1小时 ≤ 近24小时 ≤ 近7天 ≤ 自监控以来 始终成立（嵌套累计窗口，各窗口只是同一批下降段在不同时间范围上的累加）。局限：同一 30 分钟采样段内既充值又消耗时，该段的消耗会被充值掩盖而漏计。该下降量只是此密钥消耗的近似值，可能包含 DSH 之外的花费 —— 请务必与官方账单控制台交叉核对。使用此功能必须提供密钥：在 DSH 的 `.credentials.yaml` 中配置 `DEEPSEEK_API_KEY`，或设置 `DEEPSEEK_API_KEY` 环境变量。**密钥只留在服务端 —— 绝不会出现在 JSON 响应中。** 未配置密钥时该 tab 显示配置提示；遇到 HTTP/网络错误时显示失败原因并自动重试。余额 tab 使用紧凑的余额/消耗四列摘要与缩短后的走势区，完整状态说明可悬停查看。
+- **DeepSeek（官方余额）** —— 显示从 `GET https://api.deepseek.com/user/balance` 拉取的 DeepSeek 官方账户余额（[文档](https://api-docs.deepseek.com/api/get-user-balance/)）：按币种显示 总余额 / 赠送余额 / 充值余额，加上账户可用状态、一条**余额随时间变化曲线**，以及 近1小时 / 近12小时 / 近24小时 / 近7天 / 自监控以来 五个窗口的**余额下降量**。服务端在启动时立即拉取一次，之后固定每 30 分钟拉取一次，且对齐本地时间的整点与半点（`:00` / `:30`），并把每个成功取到的值追加到一份**持久化到磁盘**的历史中（`balanceFile`，默认 `$DSH_HOME/dsh-token-dashboard-balance.json`，最多 1,000,000 条样本）。启动和每次成功采样前都会合并磁盘与内存历史，再以原子方式保存，因此重启或采样进程变化不会清空已有记录。官方接口只提供当前余额，历史曲线只能依赖插件从首次采样开始本地累积，无法从接口回填更早数据。
+  下降量 = 窗口内相邻余额采样之间**余额下降的累计**（余额上升的采样段——充值/赠送到账——记 0，窗口边界跨采样段时按时间占比折算）——这是唯一可得的真实金额信号（token 日志里有用量，但价格可自由浮动，所以用量比乘上一个猜测价格更诚实）。因此消耗**永不为负**，且 近1小时 ≤ 近12小时 ≤ 近24小时 ≤ 近7天 ≤ 自监控以来 始终成立（嵌套累计窗口，各窗口只是同一批下降段在不同时间范围上的累加）。局限：同一 30 分钟采样段内既充值又消耗时，该段的消耗会被充值掩盖而漏计。该下降量只是此密钥消耗的近似值，可能包含 DSH 之外的花费 —— 请务必与官方账单控制台交叉核对。使用此功能必须提供密钥：在 DSH 的 `.credentials.yaml` 中配置 `DEEPSEEK_API_KEY`，或设置 `DEEPSEEK_API_KEY` 环境变量。**密钥只留在服务端 —— 绝不会出现在 JSON 响应中。** 未配置密钥时该 tab 显示配置提示；遇到 HTTP/网络错误时显示失败原因并自动重试。余额 tab 使用紧凑的余额/消耗五列摘要与缩短后的走势区，完整状态说明可悬停查看。折叠成迷你胶囊时余额视图只有 6 格，因此显示 余额/赠送/充值 与 1小时/12小时/24小时 三档消耗；近7天与自监控以来请在展开的余额页查看。
 
 面板上方的分段控件用于收窄**所有** tab 的时间窗口：
 
@@ -95,9 +95,10 @@ restart
 | 1月 | `30d` | 最近 30 天 | **每天** |
 | 1周 | `7d` | 最近 7 天 | 每小时 |
 | 1天 | `1d` | 最近 24 小时 | 每小时 |
+| 12小时 | `12h` | 最近 12 小时 | **每分钟** |
 | 1小时 | `1h` | 最近 1 小时 | **每分钟** |
 
-**1小时**范围是特殊的：它以**每分钟**粒度渲染趋势图（连续的 60 分钟轴，空缺补零），便于逐分钟观察最近一段活动。全局序列、每模型时段序列（`modelSeries`）与模型明细（`models`）在这一范围下**都**按分钟切分，因此堆叠柱状图能画出逐分钟分布，模型明细也不会丢掉窗口起点所在的那个不完整分钟。小窗约每 2.5 秒轮询一次，因此面板打开时大约每分钟会出现一个新的分钟数据点。**1月/全部**范围则以**每天**粒度渲染（每天一个点，由当天的小时桶折叠而成），趋势点单位与悬浮时间随之显示「天」；1天/1周范围保持小时级（显示「时」）。分钟级桶（全局与每模型各一份）以约 25 小时的滚动缓冲保存在内存中；小时桶常驻，天级序列由小时桶折叠而来。
+**1小时**与**12小时**范围是特殊的：它们以**每分钟**粒度渲染趋势图（连续的分钟轴，空缺补零），便于逐分钟观察最近一段活动——1小时为 60 分钟轴，12小时为约 721 个分钟点。全局序列、每模型时段序列（`modelSeries`）与模型明细（`models`）在这两个范围下**都**按分钟切分，因此堆叠柱状图能画出逐分钟分布，模型明细也不会丢掉窗口起点所在的那个不完整分钟。小窗约每 2.5 秒轮询一次，因此面板打开时大约每分钟会出现一个新的分钟数据点。**1月/全部**范围则以**每天**粒度渲染（每天一个点，由当天的小时桶折叠而成），趋势点单位与悬浮时间随之显示「天」；**1天**、**1周**范围保持小时级（显示「时」，1天为 25 个连续小时点）。分钟级桶（全局与每模型各一份）以约 25 小时的滚动缓冲保存在内存中；小时桶常驻，天级序列由小时桶折叠而来。
 
 切换范围会重新向服务端请求（`GET /token-dashboard/api?range=…`）并重新聚合每个会话的桶，因此汇总数值、图表以及折叠状态下的摘要标签都会反映所选窗口。会话选择器位于 会话 tab 内，提供跟随模式以及每个有数据贡献的会话条目（标签 = 推导标题 / cwd / id）。
 
@@ -109,25 +110,25 @@ restart
 
 ## API
 
-- `GET /token-dashboard/api[?range=all|1h|1d|7d|30d]` → `{ ok, now, range, activeId, config, count, backfilled, backfillError, totals, series, models[], modelSeries[], windowTotals, balance, sessions[] }`
+- `GET /token-dashboard/api[?range=all|1h|12h|1d|7d|30d]` → `{ ok, now, range, activeId, config, count, backfilled, backfillError, totals, series, models[], modelSeries[], windowTotals, balance, sessions[] }`
   - `activeId` —— 最近活跃会话的 id（取**所有**会话中最新的事件，不限于当前窗口）—— 即浏览器端跟随模式的目标
   - `totals` —— 窗口内所有会话合并的 `{ uncached, cacheRead, cacheWrite, output, calls }`
-  - `series[]` —— 窗口内合并的每小时 `{ t, in, cr, cw, out, calls, hitPct }`；当 `range=1h` 时这是由滚动分钟桶算出的每分钟序列（60–61 个点，步长 1 分钟）；当 `range=30d|all` 时是每天序列（步长 1 天，由当天的小时桶折叠）
-  - `models[]` —— 窗口内的每模型数据 `{ provider, model, totals, hitPct, sharePct }`（桶粒度与 `series[]` 一致，故 `range=1h` 时按分钟切窗口）：
+  - `series[]` —— 窗口内合并的每小时 `{ t, in, cr, cw, out, calls, hitPct }`；当 `range=1h|12h` 时这是由滚动分钟桶算出的每分钟序列（1h 为 60–61 个点、12h 约 721 个点，步长 1 分钟）；当 `range=30d|all` 时是每天序列（步长 1 天，由当天的小时桶折叠）
+  - `models[]` —— 窗口内的每模型数据 `{ provider, model, totals, hitPct, sharePct }`（桶粒度与 `series[]` 一致，故 `range=1h|12h` 时按分钟切窗口；窗口边界按槽位对齐，所以任何范围下各模型 `totals` 之和都等于全局 `totals`）：
     - `totals` —— 该「提供商/模型」组合在所有会话上求和得到的 `{ uncached, cacheRead, cacheWrite, output, calls }`
     - `hitPct` —— 该模型自己的缓存命中率，百分比 0-100，由其总和重新计算（`cacheRead ÷ (uncached + cacheRead + cacheWrite)`）
     - `sharePct` —— 占窗口总消耗（**API 整体消耗**：未缓存输入 + 缓存读取 + 缓存写入 + 输出）的比例，百分比 0-100；条目按整体消耗降序排列
     - （没有 `price`/`cost` 字段 —— 金额估算已被移除）
-  - `modelSeries[]` —— 汇总页堆叠柱状图用：`{ key, series }`，`key` 为 `provider|model`，`series` 与全局 `series[]` 时间戳一一对应的每时段 `{ t, in, cr, cw, out, calls }`；粒度与全局序列相同（`range=1h` 取自每模型分钟桶），所有模型的时段求和与全局序列对账一致
+  - `modelSeries[]` —— 汇总页堆叠柱状图用：`{ key, series }`，`key` 为 `provider|model`，`series` 与全局 `series[]` 时间戳一一对应的每时段 `{ t, in, cr, cw, out, calls }`；粒度与全局序列相同（`range=1h|12h` 取自每模型分钟桶），所有模型的时段求和与全局序列对账一致
   - `windowTotals` —— 累计 / 最近一月(d30) / 最近一周(d7) / 最近一日(d1) 四个滚动窗口的 `{ uncached, cacheRead, cacheWrite, output, calls }`（随当前时刻滚动，与所选 `range` 无关）
   - `balance` —— DeepSeek 官方余额
-    `{ configured, ok, error, fetchedAt, is_available, infos: [{ currency, total, granted, topped }], history: [{ t, total, granted, topped }], consumed: { h1, d1, d7, all } }`；
+    `{ configured, ok, error, fetchedAt, is_available, infos: [{ currency, total, granted, topped }], history: [{ t, total, granted, topped }], consumed: { h1, h12, d1, d7, all } }`；
     未设置密钥前 `configured: false`，拉取失败或从未执行时 `ok: false`；`history` 是按时间排序的余额样本（最新在最后），用于驱动曲线与 `consumed` 余额下降窗口（单位 ¥，按采样段累计下降量、充值段记 0，因此永不小于 0；窗口边界跨采样段按时间折算）。API 密钥本身绝不出现在响应中。
   - `sessions[].totals` —— 窗口内的 `{ uncached, cacheRead, cacheWrite, output, calls }`
   - `sessions[].title` —— 推导出的标签：第一条**真实用户消息**的文本（插件注入的上下文会被忽略），截断至 60 字符；该会话没有则为 `null`。DSH 不存储面向用户的标题，因此选择器会退化为使用 cwd 的基名，再退化为顺序编号，并总是追加短 id 与可选的预设标签（例如 `修复插件样式 ·a1b2c3 [standard]`）。
   - `sessions[].preset` —— 会话头中的 agent 预设 id（若有）
   - `sessions[].createdAt` —— 会话头中的创建时间，毫秒时间戳
-  - `sessions[].series[]` —— 窗口内的每小时 `{ t, in, cr, cw, out, calls }`
+  - `sessions[].series[]` —— 窗口内的每时段 `{ t, in, cr, cw, out, calls }`（粒度同全局 `series[]`：`range=1h|12h` 按分钟、`30d|all` 按天，其余按小时）
   - `sessions[].stats` —— `{ turns, steps }`（宿主侧的 `sessionStats` 在实时链路上字段更多，但回填只能恢复计数）
   - `sessions[].context` —— `{ contextWindow, pressureTokens, projectedTokens }`
 
@@ -135,8 +136,34 @@ restart
 
 ## 说明与已知限制
 
-- 响应中的趋势序列是**按小时**的（每个点聚合一小时的分步样本），这样 30 天窗口仍然可读，也让 API 能低成本地切出任意时间范围。实时的分步粒度仍在内部折叠用于去重；小时桶才是小窗渲染与 API 提供的内容。
+- 响应中的趋势序列是**按小时**的（每个点聚合一小时的分步样本），这样 30 天窗口仍然可读，也让 API 能低成本地切出任意时间范围。实时的分步粒度仍在内部折叠用于去重；小时桶才是小窗渲染与 API 提供的内容（例外：12小时与1小时范围按分钟、1月/全部按天）。
+- 模型明细与全局汇总在**任何范围**下都逐项对账（`models[].totals` 之和 = `totals`，calls 也一致）：两者的窗口边界都按桶槽对齐，窗口起点所在的那个不完整时段整段计入，不会只算模型侧或只算全局侧。
 - 回填不会重放完整的 surface 投影。因此在实时事件补上之前，`projectedTokens` 字段等于 `pressureTokens`。
 - 仍在写入的会话中，最后一个（被截断的）zstd 帧会被跳过 —— 会话写入器会在下次追加时重试。如果 dsh 在长对话中途重启，该对话最后几秒的实时样本会通过 `session/event` 订阅叠加到已回填的基线之上。
 - 小窗仅限同源使用（无 CORS），经局域网代理访问是安全的。
 - 兼容 DSH 0.1.5 的会话日志格式：0.1.5 起会话日志为事件溯源 JSONL（首行是 `type:"session"` 的会话头，其余为 `SessionEvent` 事件行）；插件按行解析，不再依赖已移除的 `decodeStorageRecord`，`foldEvent` 的字段读取与旧版一致。
+
+## 崩溃防护
+
+本插件在两个半边都做了防护，目的是让「插件本身出问题」永远不会升级成「dsh 起不来」或「页面打不开」：
+
+- **服务端 `apply` 外层 try/catch**：`apply()` 内部任何同步异常都被吞掉，降级为一条 `warn` 日志（`dsh-token-dashboard: disabled after an activation error: …`）并尽力清理定时器，绝不向 cordis 加载器抛出。这一点是必需的：`dsh-app-boot` 的 `assertEntriesLoaded` / `assertEntriesActivated` 会把插件的加载/激活失败升级为整进程的启动失败（`plugin(s) failed to load …; Cordis startup failed`），即 dsh 无法启动。
+- **异步路径全兜底**：`setImmediate` 回调、回填定时器、余额 `setTimeout` 链与 `refreshBalance()` 都各自 `try/catch` + `.catch()`。`dsh-app-boot` 安装了 `installFailLoud`（`process.on("unhandledRejection")` → `process.exit(1)`），**任何**漏出的 rejection 都会直接终结整个 dsh 进程，包括启动很久之后的运行时。
+- **前端 `apply` 外层 try/catch**：前端半边的抛错同样致命——web shell 在挂载完所有静态 client 插件后会审计 loader，失败即 `throw new Error("web boot: N entries did not activate")`，由 `run()` 的 catch 交给 `page.fail(...)`，整个 GUI 变成失败页。因此 catch 后主动按标签名清掉可能半挂载的 `<dsh-token-dashboard>` 节点，并 `console.warn` 记录。
+- **渲染与轮询隔离**：`render()` 是安全包装（真正的实现在 `renderInner()`），渲染异常降级为面板内的「渲染失败」提示；`setInterval` 轮询回调自行吞掉异常，避免一次坏数据让面板永久停摆。CSS 注入同样单独包了 try/catch。
+
+不变量：插件可以退化为「不可用 / 不出现」，但**不允许**影响 dsh 启动或页面上其他插件。
+
+### 出问题时怎么关掉本插件
+
+用 dsh 原生的 loader 禁用位，不必改插件代码 —— 它会同时挡住服务端半边与前端的 client bundle（`ClientModuleRegistry` 在组装客户端插件表时会跳过 `entry.disabled` 的条目）：
+
+```yaml
+# $DSH_HOME/profiles/web/cordis.patch.yml
+- id: token-dashboard
+  disabled: true
+```
+
+改回 `disabled: false` 并重启 dsh web 即可恢复。`install.mjs` 已存在的配置块会被原样保留，因此重新安装不会覆盖这个开关。
+
+注意 `config.enabled` 之类的「配置项开关」对本插件的前端半边**无效**：web shell 用 `loader.create({ name })` 激活静态 client 插件，启动清单（`window.__DSH_BOOT__`）只携带 `id/url/rev/inject/external/immediately`，不携带 config，前端 `apply` 根本收不到 profile 里的配置。要整体停用必须用上面的 `disabled` 位。

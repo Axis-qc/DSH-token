@@ -84,6 +84,35 @@ console.log("[2] server half");
 	}
 	ok("apply ran without throwing");
 
+	// ── crash guard: an internal apply failure must never escape ──
+	// dsh-app-boot's assertEntriesLoaded/assertEntriesActivated turn a plugin's
+	// activation throw into a whole-process startup failure ("plugin(s) failed
+	// to load ... Cordis startup failed"), i.e. dsh won't start and the frontend
+	// is unreachable. apply() must therefore swallow its own failures, log one
+	// warning, and leave the rest of the plugin set alone.
+	{
+		const warnCalls = [];
+		// A config that makes the guarded body throw before it can register
+		// anything: scanRoot is read through resolveScanRoot, and an invalid
+		// apiPath type exercises the same first statements.
+		const boomCtx = {
+			logger: { info: () => {}, warn: (m) => warnCalls.push(String(m)), error: () => {} },
+			on: () => { throw new Error("boom: subscription registration failed"); },
+			inject: () => {},
+			effect: () => () => {},
+		};
+		let threw = null;
+		try {
+			module.apply(boomCtx, { backfillOnStart: false });
+		} catch (err) {
+			threw = err;
+		}
+		assert.equal(threw, null, "apply swallows an internal failure instead of throwing at the loader");
+		assert.equal(warnCalls.length, 1, "apply logs exactly one warning when it disables itself");
+		assert.ok(warnCalls[0].includes("disabled after an activation error"), `warning names the guard (got ${JSON.stringify(warnCalls[0])})`);
+		ok("crash guard: apply failure is contained, logged once, and not rethrown");
+	}
+
 	const eventCb = captured.on.find(([n]) => n === "session/event")?.[1];
 	const injectCb = captured.injects.find(([n]) => n.includes("webServer"))?.[1];
 	assert.ok(eventCb, "session/event subscription registered");
@@ -175,7 +204,7 @@ console.log("[2] server half");
 		assert.equal(body.balance.configured, false, "balance reports unconfigured without a key");
 		assert.equal(body.balance.ok, false, "balance not ok without a key");
 		assert.ok(Array.isArray(body.balance.history) && body.balance.history.length === 0, "balance history present and empty");
-		assert.deepEqual(Object.keys(body.balance.consumed).sort(), ["all", "d1", "d7", "h1"], "balance consumed windows exposed");
+		assert.deepEqual(Object.keys(body.balance.consumed).sort(), ["all", "d1", "d7", "h1", "h12"], "balance consumed windows exposed");
 		assert.equal(JSON.stringify(body).includes("sk-"), false, "no API key leaks into the payload");
 		// Per-model aggregation: two fixture models, sorted by 总消耗 (入+出) desc.
 		//   model-1: A(1000/500/200/300) + B'(2200/850/250/750) → in 3200 cr 1350 cw 450 out 1050
@@ -221,6 +250,19 @@ console.log("[2] server half");
 		body = null;
 		await route.handler({ method: "GET", url: "/token-dashboard/api?range=7d" }, res);
 		assert.equal(body.range, "7d");
+		status = 0;
+		body = null;
+		await route.handler({ method: "GET", url: "/token-dashboard/api?range=12h" }, res);
+		assert.equal(body.range, "12h", "?range=12h is parsed");
+		// 12h is minute-granular now (minuteBins-backed), so its axis is a
+		// continuous ~721-minute span; the fixture events sit in the current
+		// minute and must survive the granularity switch.
+		assert.ok(body.series.length >= 720 && body.series.length <= 722, `12h series is per-minute (${body.series.length} points)`);
+		assert.equal(body.series[1].t - body.series[0].t, 60000, "12h series steps by exactly 1 minute");
+		assert.deepEqual(body.totals, { uncached: 6500, cacheRead: 3550, cacheWrite: 850, output: 2550, calls: 4 }, "12h window still contains the current-minute fixture");
+		// Model details must reconcile with the global totals on the 12h window too.
+		const m12 = body.models.reduce((a, m) => a + m.totals.uncached + m.totals.cacheRead + m.totals.cacheWrite + m.totals.output, 0);
+		assert.equal(m12, body.totals.uncached + body.totals.cacheRead + body.totals.cacheWrite + body.totals.output, "12h model details reconcile with the global totals");
 		status = 0;
 		body = null;
 		await route.handler({ method: "GET", url: "/token-dashboard/api?range=all" }, res);
@@ -306,6 +348,7 @@ console.log("[2] server half");
 
 		// ── hour buckets + range slicing (continuous series) ──
 		assert.equal(rangeToMs("1h"), HOUR_MS);
+		assert.equal(rangeToMs("12h"), 12 * HOUR_MS);
 		assert.equal(rangeToMs("1d"), 24 * HOUR_MS);
 		assert.equal(rangeToMs("7d"), 7 * 24 * HOUR_MS);
 		assert.equal(rangeToMs("30d"), 30 * 24 * HOUR_MS);
@@ -346,6 +389,15 @@ console.log("[2] server half");
 		assert.ok(s30.length >= 29 && s30.length <= 32, `30d series is daily (${s30.length} points)`);
 		assert.equal(s30[1].t - s30[0].t, 24 * H, "30d series steps by exactly 1 day");
 		assert.equal(s30.reduce((a, b) => a + b.out, 0), 30, "30d daily series sums to window output");
+		// ── 12h range: minute granularity on a half-day window ──
+		// 12h reads the rolling minute bins (like 1h). This fixture only has
+		// hourBins, so the minute-granular window must see nothing: mode is
+		// minute, and the hour buckets are ignored entirely.
+		const agg12 = aggregateWindow(map, rangeToMs("12h"));
+		assert.equal(agg12.mode, "minute", "12h selects the minute granularity");
+		assert.deepEqual(agg12.totals, { uncached: 0, cacheRead: 0, cacheWrite: 0, output: 0, calls: 0 }, "12h minute window ignores hour-only buckets");
+		assert.equal(agg12.series.length, 0, "no in-window contribution → no merged series");
+		assert.ok(rangeToMs("12h") < rangeToMs("1d") && rangeToMs("12h") > rangeToMs("1h"), "12h nests between 1h and 1d");
 		const all2 = aggregateWindow(map, null).series;
 		assert.ok(all2.length >= 39 && all2.length <= 42, `all series spans the full range in days (${all2.length} points)`);
 		assert.equal(all2.reduce((a, b) => a + b.out, 0), 60, "all series sums every bucket");
@@ -386,6 +438,43 @@ console.log("[2] server half");
 		assert.equal("price" in modelsAll[0], false, "no price field on model entries");
 		assert.equal("costUsd" in modelsAll[0], false, "no costUsd field on model entries");
 		assert.equal("costCny" in modelsAll[0], false, "no costCny field on model entries");
+		// ── window-boundary alignment: model details must reconcile with the
+		// global totals at EVERY granularity ──
+		// Regression: aggregateModels compared hour buckets with `hk < start`,
+		// so the partial hour at the window head (the hour containing `start`)
+		// was dropped while sliceSession counted the whole aligned slot. On real
+		// data that made the model breakdown fall short of the global totals by
+		// 9.3% (1d), 3.7% (7d) and 2.8% (30d), with calls short too.
+		const sumModelTotals = (list) => list.reduce((a, m) => ({
+			uncached: a.uncached + m.totals.uncached,
+			cacheRead: a.cacheRead + m.totals.cacheRead,
+			cacheWrite: a.cacheWrite + m.totals.cacheWrite,
+			output: a.output + m.totals.output,
+			calls: a.calls + m.totals.calls,
+		}), { uncached: 0, cacheRead: 0, cacheWrite: 0, output: 0, calls: 0 });
+		const al = newSessionState("aligned");
+		// The window head falls 1 minute into an hour: that whole hour slot is
+		// in-window per sliceSession, so the model bucket for it must count too.
+		const headHour = hk(24 * H);
+		const midHour = hk(5 * H);
+		al.modelHourBins.set("prov-a|m-a", new Map([
+			[headHour, { in: 111, cr: 11, cw: 1, out: 11, calls: 11 }], // window head (partial hour)
+			[midHour, { in: 222, cr: 22, cw: 2, out: 22, calls: 22 }],  // fully in window
+		]));
+		al.hourBins.set(headHour, { in: 111, cr: 11, cw: 1, out: 11, calls: 11 });
+		al.hourBins.set(midHour, { in: 222, cr: 22, cw: 2, out: 22, calls: 22 });
+		const alMap = new Map([["aligned", al]]);
+		const alStart = headHour + 60000; // mid-hour window start
+		const alEnd = Date.now();
+		for (const mode of ["hour", "day"]) {
+			const sliced = sliceSession(al, alStart, alEnd, mode).totals;
+			const aligned = sumModelTotals(aggregateModels(alMap, alStart, alEnd, mode));
+			assert.deepEqual(aligned, sliced, `${mode} granularity: model details reconcile with the global slot-aligned totals`);
+			assert.ok(aligned.uncached > 222, `${mode} granularity: the partial window-head slot is counted, not dropped`);
+		}
+		// The window-head hour is genuinely before `start`, which is exactly why
+		// a plain `hk < start` comparison used to lose it.
+		assert.ok(headHour < alStart, "fixture head hour really is before the window start");
 		// ── DeepSeek official balance fetch + parse ──
 		const { parseBalanceJson, fetchDeepseekBalance } = module._internal;
 		assert.deepEqual(
@@ -429,27 +518,28 @@ console.log("[2] server half");
 		// Pure consumption: h1 ⊂ d1 ⊂ d7, strictly cumulative. Totals chosen as
 		// exact binary fractions so the deepEqual below is float-exact.
 		const mono = [sample(hrsAgo(2), 10), sample(hrsAgo(1.5), 9.5), sample(hrsAgo(1), 9), sample(hrsAgo(0.5), 8.75), sample(now0, 8.5)];
-		assert.deepEqual(computeConsumed(mono, now0), { h1: 0.5, d1: 1.5, d7: 1.5, all: 1.5 }, "pure consumption accumulates drops per window");
+		assert.deepEqual(computeConsumed(mono, now0), { h1: 0.5, h12: 1.5, d1: 1.5, d7: 1.5, all: 1.5 }, "pure consumption accumulates drops per window");
 		// Top-up mid-window: the rising segment counts 0, never negative, still nested.
 		const topped = [sample(hrsAgo(2), 10), sample(hrsAgo(1), 9.5), sample(hrsAgo(0.5), 19.75), sample(now0, 19.5)];
 		const cTop = computeConsumed(topped, now0);
 		assert.equal(cTop.h1, 0.25, "top-up segment contributes 0 (no negative consumption)");
+		assert.equal(cTop.h12, 0.75, "h12 sums only real drops (the top-up is inside the 12h window)");
 		assert.equal(cTop.d1, 0.75, "d1 sums only real drops");
-		assert.ok(cTop.d1 >= cTop.h1 && cTop.d7 >= cTop.d1 && cTop.all >= cTop.d7, "windows stay nested after a top-up");
+		assert.ok(cTop.h1 <= cTop.h12 && cTop.h12 <= cTop.d1 && cTop.d1 <= cTop.d7 && cTop.d7 <= cTop.all, "windows stay nested after a top-up");
 		assert.ok(!Object.values(cTop).some((v) => v !== null && v < 0), "no negative consumption ever");
 		// Window-boundary proration: straddling segment scaled by time overlap.
 		const prorated = [sample(now0 - 90 * MIN, 10), sample(now0 - 45 * MIN, 7), sample(now0, 4)];
-		assert.deepEqual(computeConsumed(prorated, now0), { h1: 4, d1: 6, d7: 6, all: 6 }, "h1 prorates the straddling 15min of the first drop, d1 counts it fully");
+		assert.deepEqual(computeConsumed(prorated, now0), { h1: 4, h12: 6, d1: 6, d7: 6, all: 6 }, "h1 prorates the straddling 15min of the first drop, d1 counts it fully");
 		// Old-code regression: h1=0.06 / d1=4.91 / d7=0.25 style breaks nesting;
 		// with drop accumulation d7 ≥ d1 ≥ h1 holds even across a top-up.
 		const reg = [sample(now0 - 10 * DAY, 5), sample(now0 - 8 * DAY, 4.9), sample(now0 - 3 * DAY, 15), sample(now0 - 1 * DAY, 14.5), sample(now0 - 6 * HOUR, 14.3), sample(now0 - 2 * HOUR, 14.1), sample(now0 - 30 * MIN, 13.9), sample(now0, 13.8)];
 		const cReg = computeConsumed(reg, now0);
 		assert.ok(cReg.h1 > 0, "regression: h1 positive");
-		assert.ok(cReg.h1 <= cReg.d1 && cReg.d1 <= cReg.d7 && cReg.d7 <= cReg.all, "regression: windows strictly nested (d7 ≥ d1 ≥ h1)");
+		assert.ok(cReg.h1 <= cReg.h12 && cReg.h12 <= cReg.d1 && cReg.d1 <= cReg.d7 && cReg.d7 <= cReg.all, "regression: windows strictly nested (d7 ≥ d1 ≥ h12 ≥ h1)");
 		// Empty history → nulls; single sample → zeros (no drops observed).
-		assert.deepEqual(computeConsumed([], now0), { h1: null, d1: null, d7: null, all: null }, "empty history → all null");
-		assert.deepEqual(computeConsumed([sample(now0, 8.5)], now0), { h1: 0, d1: 0, d7: 0, all: 0 }, "single sample → zeros");
-		ok("computeConsumed: nested cumulative windows, top-up-safe, boundary proration");
+		assert.deepEqual(computeConsumed([], now0), { h1: null, h12: null, d1: null, d7: null, all: null }, "empty history → all null");
+		assert.deepEqual(computeConsumed([sample(now0, 8.5)], now0), { h1: 0, h12: 0, d1: 0, d7: 0, all: 0 }, "single sample → zeros");
+		ok("computeConsumed: nested cumulative windows (h1 ≤ h12 ≤ d1 ≤ d7 ≤ all), top-up-safe, boundary proration");
 		// ── 1h range: per-minute granularity from minuteBins ──
 		const mn = newSessionState("mn");
 		const M = 60000;
@@ -496,7 +586,27 @@ console.log("[2] server half");
 		// The same state on an hour-granular window still reads hour buckets.
 		const mdetAll = aggregateModels(mmap3, 0, Date.now(), "hour");
 		assert.deepEqual(mdetAll[0].totals, { uncached: 9999, cacheRead: 0, cacheWrite: 0, output: 999, calls: 9 }, "hour-granular windows keep reading hour buckets");
-		ok("foldEvent replaces same (turn, step), continuous hour series + range slicing + per-model aggregation + 1h/minute granularity work");
+		// ── 12h range: the same minute bins, on a half-day window ──
+		// 12h must behave like 1h for granularity: global series, per-model
+		// series and model details all read the minute bins, while 1d/7d keep
+		// reading the hour bins.
+		const agg12b = aggregateWindow(mmap2, rangeToMs("12h"));
+		assert.equal(agg12b.mode, "minute", "12h selects minute mode");
+		assert.equal(agg12b.totals.output, 6, "12h global totals sum every minute bucket within the window");
+		assert.ok(agg12b.series.length >= 720 && agg12b.series.length <= 722, `12h series is per-minute (${agg12b.series.length} points)`);
+		assert.equal(agg12b.series[1].t - agg12b.series[0].t, 60000, "12h series steps by exactly 1 minute");
+		const mseries12 = aggregateModelWindowSeries(mmap3, agg12b.start, Date.now(), "minute");
+		assert.equal(mseries12.length, 1, "12h model series exposes the model");
+		assert.equal(mseries12[0].series.reduce((a, p) => a + p.in, 0), 700, "12h model series reads all three minute buckets and ignores the hour bucket");
+		assert.equal(mseries12[0].series.reduce((a, p) => a + p.calls, 0), 9, "12h model series carries per-minute call counts");
+		const mdet12 = aggregateModels(mmap3, agg12b.start, Date.now(), "minute");
+		assert.deepEqual(mdet12[0].totals, { uncached: 700, cacheRead: 50, cacheWrite: 0, output: 21, calls: 9 }, "12h model details read minute buckets and match the window");
+		// 1d and 7d remain hour-granular: the minute-only state contributes nothing.
+		assert.equal(aggregateWindow(mmap2, rangeToMs("1d")).mode, "hour", "1d keeps hour mode");
+		assert.equal(aggregateWindow(mmap2, rangeToMs("7d")).mode, "hour", "7d keeps hour mode");
+		assert.equal(aggregateWindow(mmap2, rangeToMs("1d")).totals.output, 0, "1d still ignores minute bins");
+		assert.equal(aggregateWindow(mmap3, rangeToMs("1d")).totals.output, 0, "1d ignores model minute bins");
+		ok("foldEvent replaces same (turn, step), continuous hour series + range slicing + per-model aggregation + 1h/12h minute granularity + slot-aligned model/global reconciliation work");
 	} catch (err) {
 		bad("server logic", err);
 	}

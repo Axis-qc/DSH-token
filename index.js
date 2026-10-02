@@ -15,7 +15,7 @@
  * 累计总量并产出一个走势点）。
  *
  * 输出：`GET /token-dashboard/api` 提供浏览器组件轮询所需的 JSON。
- * 可选的 `?range=1d|7d|30d|all` 查询会把总量 + 小时趋势序列
+ * 可选的 `?range=1h|12h|1d|7d|30d|all` 查询会把总量 + 趋势序列
  * 裁剪到末尾时间窗口；缺省/`all` 返回完整的历史聚合。
  *
  * 配置（所有键均可选）：
@@ -133,7 +133,7 @@ function newSessionState(id) {
 		/** @type {Map<number, import('./index.js').HourBins>} 小时起始时刻（ms）→ 增量桶 */
 		hourBins: new Map(),
 		/** 细粒度分钟桶（minute-start-ms → 增量桶）：以滚动缓冲保留最近
-		 *  约 25 小时的分钟槽，使 1h 范围能渲染每分钟的趋势；
+		 *  约 25 小时的分钟槽，使 1h 与 12h 范围能渲染每分钟的趋势；
 		 *  更旧的分钟桶会在冲刷时惰性清理。 */
 		minuteBins: new Map(),
 		/** 每个模型的每小时增量桶：modelKey（"provider|model"）→
@@ -142,9 +142,9 @@ function newSessionState(id) {
 		 *  模型 tab 就能按相同的时间范围切分各模型的消耗。 */
 		modelHourBins: new Map(),
 		/** 每个模型的每分钟增量桶：形状同 modelHourBins，但槽位是
-		 *  分钟起始时刻。1h 范围下全局序列已按分钟渲染，模型维度的
-		 *  序列与明细也必须同粒度，否则一小时的消耗会被整点小时桶
-		 *  压成一个点（堆叠柱状图只出现一根柱），模型明细在窗口
+		 *  分钟起始时刻。1h 与 12h 范围下全局序列已按分钟渲染，模型
+		 *  维度的序列与明细也必须同粒度，否则窗口内的消耗会被整点
+		 *  小时桶压成一个点（堆叠柱状图只出现一根柱），模型明细在窗口
 		 *  中点还会漏掉首个不完整小时。滚动缓冲的修剪规则与
 		 *  minuteBins 一致（约 25 小时）。 */
 		modelMinuteBins: new Map(),
@@ -228,7 +228,7 @@ function flushLastSample(state, t, alsoSeries) {
 			mhb.cw += dCw;
 			mhb.out += dOut;
 		}
-		// 1h 范围使用的分钟粒度桶：同样的增量，放入分钟槽。
+		// 1h/12h 范围使用的分钟粒度桶：同样的增量，放入分钟槽。
 		// 缓冲区是滚动的：一旦超过约 25 小时的槽位，就修剪早于
 		// 25 小时的旧分钟，使长会话的回填保持内存有界。
 		const mk2 = Math.floor(t / 60000) * 60000;
@@ -247,7 +247,7 @@ function flushLastSample(state, t, alsoSeries) {
 				if (k < cutoff) state.minuteBins.delete(k);
 			}
 		}
-		// 同一个增量也放进该模型的分钟桶：1h 范围下模型堆叠柱状图与
+		// 同一个增量也放进该模型的分钟桶：1h/12h 范围下模型堆叠柱状图与
 		// 模型明细都按分钟切分，与全局序列同粒度。修剪规则同上。
 		const mkMin = last.modelKey;
 		if (mkMin) {
@@ -394,7 +394,7 @@ function foldEvent(state, event) {
 			}
 			modelBucket.calls += 1;
 			// 同一计数的分钟粒度版本：保持模型分钟桶的 calls 与
-			// 全局 minuteBins 对账，1h 范围的模型明细才能显示调用次数。
+			// 全局 minuteBins 对账，1h/12h 范围的模型明细才能显示调用次数。
 			let modelMinuteMap = state.modelMinuteBins.get(modelKey);
 			if (!modelMinuteMap) {
 				modelMinuteMap = new Map();
@@ -557,15 +557,25 @@ function backfillAll(sessions, root, seriesSize, logger) {
 		for (const sess of sessionDirs) {
 			if (!sess.isDirectory()) continue;
 			const sessDir = join(projectPath, sess.name);
-			// DSH 0.1.5 起会话日志文件名变为 session.v3.jsonl.zstd；旧版为
-			// session.jsonl.zstd。优先采用 v3（新版），回退旧名兼容历史会话。
+			// 会话日志文件名随 DSH 版本演进：0.1.4 及更早为 session.jsonl.zstd，
+			// 0.1.5 为 session.v3.jsonl.zstd，0.1.7 为 session.v4.jsonl.zstd。
+			// 目录里可能同时残留多个版本（DSH 升级时旧文件不会被删），必须
+			// 选最新格式的那个——旧文件是升版时刻的定格快照，继续折它会把
+			// 该会话的统计永久钉在升级那一刻（0.1.7 实测踩过：目录里同时有
+			// 482 字节的 v3 空壳与 4.9MB 的 v4 全量，偏袒 v3 导致回填只算出
+			// 2 个 turn，237M token 的历史全部丢失）。
+			// 权重：v4 > v3 > 无版本号，同权重时取文件名更大的（版本号更高）。
+			const weight = (name) => {
+				const m = /^session\.v(\d+)\.jsonl\.zstd$/.exec(name);
+				return m ? Number(m[1]) : 0;
+			};
 			let entries;
 			try { entries = readdirSync(sessDir, { withFileTypes: true }); }
 			catch { stats.files += 1; continue; }
 			const names = entries
 				.filter((e) => e.isFile() && /^session.*\.jsonl\.zstd$/.test(e.name))
 				.map((e) => e.name)
-				.sort((a, b) => (b.includes("v3") ? 1 : 0) - (a.includes("v3") ? 1 : 0));
+				.sort((a, b) => weight(b) - weight(a));
 			if (names.length === 0) { stats.files += 1; continue; }
 			const file = join(sessDir, names[0]);
 			stats.files += 1;
@@ -588,6 +598,7 @@ const HOUR_MS = 3600000;
 const DAY_MS = 24 * HOUR_MS;
 const RANGE_MS = {
 	"1h": HOUR_MS,
+	"12h": 12 * HOUR_MS,
 	"1d": DAY_MS,
 	"7d": 7 * DAY_MS,
 	"30d": 30 * DAY_MS,
@@ -615,7 +626,7 @@ const MINUTE_MS = 60000;
  * 窗口内的总量和一条**连续**序列：从窗口起点到当前时刻的每个槽位
  * 都存在，空槽位以 0 填充，因此图表显示均匀的时间轴，而不是只绘制
  * 有活动的槽位。粒度默认为小时，mode 为 "minute" 时按分钟（用于
- * 1h 范围，它从 minuteBins 渲染每分钟趋势），"day" 时按天（从
+ * 1h/12h 范围，它们从 minuteBins 渲染每分钟趋势），"day" 时按天（从
  * hourBins 折叠每天的 24 小时为一天，用于 30d/全部 范围）。很长的
  * 窗口会加宽步长（k 槽位桶），而不是截断历史。
  * @param {ReturnType<typeof newSessionState>} state
@@ -656,7 +667,6 @@ function sliceSession(state, start, endMs, mode) {
 		series.push({ t, in: b.in, cr: b.cr, cw: b.cw, out: b.out, calls: b.calls });
 	}
 	return { totals, series };
-	return { totals, series };
 }
 
 /**
@@ -682,8 +692,8 @@ function aggregateWindow(sessions, rangeMs) {
 		}
 		start = earliest === Infinity ? now : earliest;
 	}
-	// 1h 范围按分钟渲染；30d 与全部（null）按天渲染；其余按小时。
-	const mode = rangeMs === HOUR_MS ? "minute" : rangeMs == null || rangeMs >= 30 * DAY_MS ? "day" : "hour";
+	// 1h 与 12h 范围按分钟渲染；30d 与全部（null）按天渲染；其余按小时。
+	const mode = rangeMs === HOUR_MS || rangeMs === RANGE_MS["12h"] ? "minute" : rangeMs == null || rangeMs >= 30 * DAY_MS ? "day" : "hour";
 	const totals = { uncached: 0, cacheRead: 0, cacheWrite: 0, output: 0, calls: 0 };
 	const hourMap = new Map();
 	const sessionTotals = new Map();
@@ -733,7 +743,7 @@ function aggregateWindow(sessions, rangeMs) {
 /**
  * 把窗口内每个模型的消耗折叠成与全局序列同网格的每时段序列
  * （供汇总页的按模型堆叠柱状图使用）：时段宽度取自窗口的桶粒度
- * （1h → 分钟、30d/全部 → 天、其余 → 小时），网格与全局 series
+ * （1h/12h → 分钟、30d/全部 → 天、其余 → 小时），网格与全局 series
  * 的 t 值完全一致，因此每段柱可直接与全局柱对齐。
  * @param {Map<string, ReturnType<typeof newSessionState>>} sessions
  * @param {number} start - 窗口起点（ms 时间戳）。
@@ -745,7 +755,7 @@ function aggregateWindow(sessions, rangeMs) {
 function aggregateModelWindowSeries(sessions, start, endMs, mode) {
 	const slotMs = mode === "minute" ? MINUTE_MS : mode === "day" ? DAY_MS : HOUR_MS;
 	// 分钟粒度必须读每模型的分钟桶：模型小时桶会把一整小时的消耗
-	// 压进单个整点槽，1h 范围的堆叠柱状图因此只剩一根柱。
+	// 压进单个整点槽，1h/12h 范围的堆叠柱状图因此只剩一根柱。
 	const useMinuteBins = mode === "minute";
 	const startSlot = Math.floor(start / slotMs) * slotMs;
 	const endSlot = Math.floor(endMs / slotMs) * slotMs;
@@ -789,9 +799,11 @@ function aggregateModelWindowSeries(sessions, start, endMs, mode) {
  * （未知对回退到 未知|未知）。占比基于模型的 总消耗 计算
  * （API 整体消耗：uncached 输入 + 缓存读取 + 缓存写入 + 输出），
  * 这与图表使用的整体消耗定义一致。
- * 桶粒度由 mode 决定：mode 为 "minute"（1h 范围）时读每模型分钟桶，
- * 否则读每模型小时桶。这两种粒度必须与 aggregateWindow 选的粒度
- * 一致，否则模型明细会在 1h 窗口下整块丢掉窗口首个不完整小时。
+ * 桶粒度由 mode 决定：mode 为 "minute"（1h/12h 范围）时读每模型分钟桶，
+ * 否则读每模型小时桶，mode 为 "day" 时把小时桶折叠进天槽。这三种粒度
+ * 都必须与 aggregateWindow 选的粒度一致。窗口边界一律按槽位对齐
+ * （与 sliceSession 相同），因此任何粒度下模型明细合计都与全局 totals
+ * 逐项对账。
  * 不提供货币估算：token 数来自会话日志是精确的，金额则不是
  * （参见 DeepSeek 余额 tab）。
  * @param {Map<string, ReturnType<typeof newSessionState>>} sessions
@@ -803,11 +815,14 @@ function aggregateModelWindowSeries(sessions, start, endMs, mode) {
  */
 function aggregateModels(sessions, start, endMs, mode) {
 	const useMinuteBins = mode === "minute";
-	// 分钟粒度按分钟槽对齐窗口，与 sliceSession 的语义一致（窗口起点
-	// 所在的那一分钟整槽都算在窗口内），这样 1h 窗口下模型明细与
-	// 全局 totals 必然对账。小时粒度保持原有的逐桶比较方式不变。
-	const startSlot = Math.floor(start / MINUTE_MS) * MINUTE_MS;
-	const endSlot = Math.floor(endMs / MINUTE_MS) * MINUTE_MS + MINUTE_MS;
+	// 窗口边界必须与 sliceSession 的槽位对齐口径完全一致：窗口起点所在的
+	// 那一格是"不完整格"，但整格都算在窗口内（startSlot 向下取整），窗口
+	// 终点所在格同样整格纳入。若这里改成精确比较（hk < start），窗口首部
+	// 那个不完整格会被整块丢掉，小时与天粒度下「模型明细合计」就会小于
+	// 全局 totals（实测 1d 差 9.29%、7d 差 3.70%、30d 差 2.85%，calls 同样偏少）。
+	const slotMs = useMinuteBins ? MINUTE_MS : mode === "day" ? DAY_MS : HOUR_MS;
+	const startSlot = Math.floor(start / slotMs) * slotMs;
+	const endSlot = Math.floor(endMs / slotMs) * slotMs + slotMs;
 	const picked = new Map();
 	for (const state of sessions.values()) {
 		const sourceBins = useMinuteBins ? state.modelMinuteBins : state.modelHourBins;
@@ -827,9 +842,7 @@ function aggregateModels(sessions, start, endMs, mode) {
 				picked.set(mk, rec);
 			}
 			for (const [hk, b] of bins) {
-				if (useMinuteBins) {
-					if (hk < startSlot || hk >= endSlot) continue;
-				} else if (hk < start || hk > endMs) continue;
+				if (hk < startSlot || hk >= endSlot) continue;
 				rec.uncached += b.in;
 				rec.cacheRead += b.cr;
 				rec.cacheWrite += b.cw;
@@ -1001,7 +1014,7 @@ function saveBalanceHistory(filePath, samples, logger) {
  * （充值/赠送到账）的那一段记 0；窗口边界跨段时按时间占比折算。
  * 因此：
  *  - 结果永不为负——充值/赠送不会产生"负消耗"；
- *  - h1/d1/d7/all 是嵌套累计窗口，必然满足 h1 ≤ d1 ≤ d7 ≤ all
+ *  - h1/h12/d1/d7/all 是嵌套累计窗口，必然满足 h1 ≤ h12 ≤ d1 ≤ d7 ≤ all
  *    （各窗口只是同一批下降段在不同时间范围上的累加，不再是互相独立的
  *    余额差）；
  *  - 仍是真实余额信号（不是 token×定价的估算）。
@@ -1009,10 +1022,10 @@ function saveBalanceHistory(filePath, samples, logger) {
  * 充值掩盖而漏计；赠送余额过期导致的余额下降会被计为消耗。
  * @param {Array<{ t: number, total: number, granted: number, topped: number }>} hist
  * @param {number} now - 窗口末端（ms 时间戳）。
- * @returns {{ h1: number|null, d1: number|null, d7: number|null, all: number|null }}
+ * @returns {{ h1: number|null, h12: number|null, d1: number|null, d7: number|null, all: number|null }}
  */
 function computeConsumed(hist, now) {
-	if (!Array.isArray(hist) || hist.length === 0) return { h1: null, d1: null, d7: null, all: null };
+	if (!Array.isArray(hist) || hist.length === 0) return { h1: null, h12: null, d1: null, d7: null, all: null };
 	const consumedIn = (windowMs) => {
 		const start = now - windowMs;
 		let total = 0;
@@ -1030,6 +1043,7 @@ function computeConsumed(hist, now) {
 	};
 	return {
 		h1: consumedIn(3600000),
+		h12: consumedIn(12 * 3600000),
 		d1: consumedIn(86400000),
 		d7: consumedIn(7 * 86400000),
 		all: consumedIn(Number.POSITIVE_INFINITY),
@@ -1080,6 +1094,35 @@ async function fetchDeepseekBalance(apiKey, fetchFn) {
  * @param {Record<string, unknown>} [config]
  */
 export function apply(ctx, config = {}) {
+	// 崩溃防护（外层）：apply 内的任何同步异常都不允许冒泡到 cordis 加载器。
+	// dsh-app-boot 的 assertEntriesLoaded / assertEntriesActivated 会把「插件未能
+	// 加载 / 未能激活」升级成整个 dsh 的启动失败（表现为启动不了、前端打不开），
+	// 所以这里把异常降级为一条 warn 日志 + 尽力清理定时器。代价是本插件退化为
+	// 不可用（面板显示连接失败），换来 dsh 与其余插件照常启动。
+	const timers = { refresh: null, balance: null };
+	try {
+		applyPlugin(ctx, config, timers);
+	} catch (error) {
+		if (timers.refresh !== null) {
+			try { clearInterval(timers.refresh); } catch { /* 清理失败不再抛 */ }
+		}
+		if (timers.balance !== null) {
+			try { clearTimeout(timers.balance); } catch { /* 清理失败不再抛 */ }
+		}
+		try {
+			ctx?.logger?.warn?.(`dsh-token-dashboard: disabled after an activation error: ${error && error.stack ? error.stack : String(error)}`);
+		} catch { /* 日志通道本身不可用时静默 */ }
+	}
+}
+
+/**
+ * 插件真实主体（由 {@link apply} 包一层崩溃防护后调用）。
+ * @param {import('@deepseek-ai/cordis').Context} ctx
+ * @param {Record<string, unknown>} [config]
+ * @param {{ refresh: ReturnType<typeof setInterval> | null, balance: ReturnType<typeof setTimeout> | null }} timers
+ *   定时器句柄的回填容器，供 apply 的 catch 分支做尽力清理。
+ */
+function applyPlugin(ctx, config = {}, timers = { refresh: null, balance: null }) {
 	const apiPath = typeof config.apiPath === "string" && config.apiPath.trim() !== "" ? config.apiPath : DEFAULT_API_PATH;
 	const seriesSize = clampInt(config.seriesSize, 1, 100000, DEFAULT_SERIES_SIZE);
 	const backfillOnStart = config.backfillOnStart !== false;
@@ -1105,7 +1148,7 @@ export function apply(ctx, config = {}) {
 		infos: [],
 		/** 有序的近期采样：[{ t, total, granted, topped }]，最早的在前。 */
 		history: initialBalanceHistory,
-		/** 1h / 1d / 7d / all 各窗口内的余额下降量累计（逐段累计，充值段记 0）。 */
+		/** 1h / 12h / 1d / 7d / all 各窗口内的余额下降量累计（逐段累计，充值段记 0）。 */
 		consumed: computeConsumed(initialBalanceHistory, Date.now()),
 	};
 	// 直接复用 DSH 集中凭据存储：读取 $DSH_HOME/.credentials.yaml 的
@@ -1158,7 +1201,7 @@ export function apply(ctx, config = {}) {
 				hist.push({ t: now, total: cur.total, granted: cur.granted, topped: cur.topped });
 				if (hist.length > BALANCE_HISTORY_MAX) hist.splice(0, hist.length - BALANCE_HISTORY_MAX);
 			}
-			balance = { configured: true, ok: true, error: null, fetchedAt: now, is_available: parsed.is_available, infos: parsed.infos, history: hist, consumed: { h1: null, d1: null, d7: null, all: null } };
+			balance = { configured: true, ok: true, error: null, fetchedAt: now, is_available: parsed.is_available, infos: parsed.infos, history: hist, consumed: { h1: null, h12: null, d1: null, d7: null, all: null } };
 			balance.consumed = computeConsumed(balance.history, now);
 			// 持久化每个成功采样，使重启后仍保留历史。
 			saveBalanceHistory(balanceFile, balance.history, ctx.logger);
@@ -1326,9 +1369,18 @@ export function apply(ctx, config = {}) {
 	}
 
 	// 在 apply 返回后再调度历史回放，这样它绝不会阻塞
-	// fiber 的激活审计。
+	// fiber 的激活审计。setImmediate 回调里任何漏出的异常都会变成
+	// unhandledRejection，而 dsh-app-boot 的 installFailLoud 会直接
+	// process.exit(1) 掉整个 dsh——回填本身已有 try/catch，这里再兜一层
+	// 防的是回填之外的意外。
 	if (backfillOnStart) {
-		setImmediate(() => runBackfill(false));
+		setImmediate(() => {
+			try {
+				runBackfill(false);
+			} catch (error) {
+				ctx.logger?.warn?.(`dsh-token-dashboard: backfill scheduling failed: ${String(error)}`);
+			}
+		});
 	}
 
 	// 每隔几分钟刷新一次回填，这样 dsh 运行期间写入的新持久化会话
@@ -1336,6 +1388,7 @@ export function apply(ctx, config = {}) {
 	// JSONL mtime 比已持有的更新时会重新折叠；
 	// 未变化的会话会被跳过。
 	const refreshTimer = setInterval(() => runBackfill(true), BACKFILL_REFRESH_MS);
+	timers.refresh = refreshTimer;
 	if (typeof refreshTimer.unref === "function") refreshTimer.unref();
 
 	// DeepSeek 余额：启动后立即拉取一次，之后用 setTimeout 链对齐到
@@ -1360,9 +1413,20 @@ export function apply(ctx, config = {}) {
 		const targetMinute = now.getMinutes() < 30 ? 30 : 60;
 		const delay = targetMinute * 60000 - now.getMinutes() * 60000 - now.getSeconds() * 1000 - now.getMilliseconds();
 		balanceTimer = setTimeout(() => {
-			refreshBalance().catch(() => {});
-			scheduleBalanceTick();
+			// refreshBalance 自身可能抛（例如 fetch 未定义时的同步 TypeError），
+			// 定时器回调里漏出的异常同样会触发 installFailLoud 的退出。
+			try {
+				refreshBalance().catch(() => {});
+			} catch (error) {
+				ctx.logger?.warn?.(`dsh-token-dashboard: balance refresh failed: ${String(error)}`);
+			}
+			try {
+				scheduleBalanceTick();
+			} catch (error) {
+				ctx.logger?.warn?.(`dsh-token-dashboard: balance reschedule failed: ${String(error)}`);
+			}
 		}, delay);
+		timers.balance = balanceTimer;
 		if (typeof balanceTimer.unref === "function") balanceTimer.unref();
 	}
 

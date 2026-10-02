@@ -33,7 +33,7 @@ export interface TokenDashboardTotals {
 }
 
 /** 一个用量样本（把桶内各步的增量聚合在一起）。桶粒度随 range 变化：
- *  1h 为分钟、1d/7d 为小时、30d/全部 为天。 */
+ *  1h/12h 为分钟、1d/7d 为小时、30d/全部 为天。 */
 export interface TokenDashboardHourSample {
   t: number;
   in: number;
@@ -102,13 +102,13 @@ export interface TokenDashboardBalance {
   /** 按时间顺序排列的近期样本（最新在最后）。每次成功拉取都会持久化到磁盘
    *  并在启动时重新载入，因此各时间窗口能跨重启保留。 */
   history: TokenDashboardBalanceSample[];
-  /** 近 1 小时 / 24 小时 / 7 天 / 全部窗口内的余额下降量累计：相邻采样对之间余额下降
+  /** 近 1 小时 / 12 小时 / 24 小时 / 7 天 / 全部窗口内的余额下降量累计：相邻采样对之间余额下降
    *  记为消耗、余额上升（充值/赠送到账）记 0，窗口边界跨采样段时按时间占比折算。
-   *  因此永不出现负值，且必然满足 h1 ≤ d1 ≤ d7 ≤ all（嵌套累计窗口）。 */
-  consumed: { h1: number | null; d1: number | null; d7: number | null; all: number | null };
+   *  因此永不出现负值，且必然满足 h1 ≤ h12 ≤ d1 ≤ d7 ≤ all（嵌套累计窗口）。 */
+  consumed: { h1: number | null; h12: number | null; d1: number | null; d7: number | null; all: number | null };
 }
 
-/** GET <apiPath>[?range=all|1h|1d|7d|30d] 的响应体。 */
+/** GET <apiPath>[?range=all|1h|12h|1d|7d|30d] 的响应体。 */
 export interface TokenDashboardPayload {
   ok: true;
   now: number;
@@ -122,7 +122,7 @@ export interface TokenDashboardPayload {
   backfillError: string | null;
   /** 窗口内所有会话合并后的汇总值。 */
   totals: TokenDashboardTotals;
-  /** 窗口内合并的每小时趋势；range=1h 时为每分钟粒度（60-61 个点），range=30d|all 时为每天粒度。 */
+  /** 窗口内合并的每小时趋势；range=1h|12h 时为每分钟粒度（1h 为 60-61 个点、12h 约 721 个点），range=1d|7d 时为每小时粒度（24-25 / 168-169 个点），range=30d|all 时为每天粒度。 */
   series: TokenDashboardHourSample[];
   /** 窗口内的每模型消耗，按消耗降序排列。 */
   models: TokenDashboardModel[];
@@ -136,7 +136,7 @@ export interface TokenDashboardPayload {
   };
   /** 汇总页堆叠柱状图用：与 `series` 同时间网格的每模型时段序列。
    *  `key` 为 "provider|model"，`series` 的时间戳与全局 `series` 一一对应。
-   *  粒度与全局 `series` 一致：range=1h 时按分钟（取自每模型分钟桶）、
+   *  粒度与全局 `series` 一致：range=1h|12h 时按分钟（取自每模型分钟桶）、
    *  range=30d|all 时按天、其余按小时。 */
   modelSeries: Array<{
     key: string;

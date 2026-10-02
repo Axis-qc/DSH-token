@@ -67,7 +67,47 @@ try {
 	bad("registration", err);
 }
 
-console.log("[2] CSS well-formedness");
+console.log("[2] crash guard: a hostile apply must not throw");
+// The web shell boots every static client plugin and then audits the loader:
+// `web boot: N entries did not activate` throws out of `run()`, which calls
+// `page.fail(...)` — the whole GUI shows a failure screen instead of the app.
+// So a throw from this plugin's apply must be contained here.
+try {
+	let handoff2 = null;
+	const savedWindow = globalThis.window;
+	globalThis.window = {
+		__ModuleLoader__: { load(h) { handoff2 = h; } },
+		innerWidth: 1200,
+		innerHeight: 800,
+		addEventListener() {},
+		removeEventListener() {},
+		localStorage: { getItem: () => null, setItem() {} },
+	};
+	// Re-import under a cache-busting query so the module re-registers.
+	const { pathToFileURL: toUrl } = await import("node:url");
+	await import(toUrl(join(HERE, "client.js")) + "?guard=1");
+	if (!handoff2) throw new Error("second registration did not happen");
+	const mod2 = handoff2.factory(() => { throw new Error("no requires expected"); });
+	// A context whose first touched API throws, standing in for a DSH API change
+	// that removed or renamed something this plugin calls during activation.
+	const hostileCtx = {
+		effect() { throw new Error("boom: effect() contract changed"); },
+		inject() { throw new Error("boom: inject() contract changed"); },
+	};
+	let threw = null;
+	try {
+		mod2.apply(hostileCtx, {});
+	} catch (err) {
+		threw = err;
+	}
+	if (threw !== null) throw new Error("apply escaped with: " + threw.message);
+	ok("apply swallows an activation failure instead of failing the page boot");
+	globalThis.window = savedWindow;
+} catch (err) {
+	bad("crash guard", err);
+}
+
+console.log("[3] CSS well-formedness");
 // Read source and find the CSS string to check its brace balance without
 // executing the DOM-injection branch (which needs a real `document`).
 const { readFileSync } = await import("node:fs");

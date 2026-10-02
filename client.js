@@ -445,6 +445,10 @@ window.__ModuleLoader__.load({
 			"  background: var(--tdb-bg-elev); border-radius: 6px;",
 			"}",
 			"dsh-token-dashboard .tdb-bars .tdb-empty{ width: 100%; }",
+			// 高密度槽位（12h 逐分钟约 721 格）下取消柱间距，否则 1px × 槽数
+			// 早已超过容器宽度，每根柱都会被压成 0 宽。
+			"dsh-token-dashboard .tdb-bars.tdb-dense{ gap: 0; }",
+			"dsh-token-dashboard .tdb-bars.tdb-dense .tdb-bcol i{ min-height: 0; }",
 			"dsh-token-dashboard .tdb-bars .tdb-bcol{",
 			"  flex: 1 1 0; min-width: 0; height: 100%;",
 			"  display: flex; flex-direction: column; justify-content: flex-end; align-items: stretch; cursor: default;",
@@ -473,7 +477,7 @@ window.__ModuleLoader__.load({
 			"}",
 			"dsh-token-dashboard .tdb-ds-balances, dsh-token-dashboard .tdb-ds-consumed{ display: grid; gap: 6px; }",
 			"dsh-token-dashboard .tdb-ds-balances{ grid-template-columns: repeat(3, minmax(0, 1fr)); }",
-			"dsh-token-dashboard .tdb-ds-consumed{ grid-template-columns: repeat(4, minmax(0, 1fr)); }",
+			"dsh-token-dashboard .tdb-ds-consumed{ grid-template-columns: repeat(5, minmax(0, 1fr)); }",
 			"dsh-token-dashboard .tdb-ds-balances .tdb-cell, dsh-token-dashboard .tdb-ds-consumed .tdb-cell{",
 			"  min-width: 0; padding: 6px 8px; gap: 1px;",
 			"}",
@@ -492,6 +496,34 @@ window.__ModuleLoader__.load({
 			"}",
 			"dsh-token-dashboard .tdb-selrow .tdb-select:hover{ background: var(--tdb-bg-cell-hover); }",
 			"dsh-token-dashboard .tdb-selrow .tdb-select option{ background: var(--tdb-bg); color: var(--tdb-fg); }",
+			// 会话面板：当前时间范围内按会话消耗排名（只读展示，不可点击）。
+			// 明细行复用汇总页的 .tdb-mstats/.tdb-mstat 与颜色语义，视觉保持一致。
+			"dsh-token-dashboard .tdb-rank{ display: flex; flex-direction: column; gap: 5px; }",
+			"dsh-token-dashboard .tdb-rleg{ font-size: 9.5px; color: var(--tdb-fg-faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }",
+			"dsh-token-dashboard .tdb-rlist{ display: flex; flex-direction: column; gap: 5px; }",
+			"dsh-token-dashboard .tdb-ritem{",
+			"  display: flex; flex-direction: column; gap: 4px; min-width: 0; cursor: default;",
+			"  padding: 6px 6px 5px; border: 1px solid var(--tdb-border); border-radius: var(--tdb-radius-sm);",
+			"  background: color-mix(in srgb, var(--tdb-bg-cell) 55%, transparent);",
+			"}",
+			"dsh-token-dashboard .tdb-rtop{ display: flex; align-items: baseline; gap: 7px; min-width: 0; }",
+			"dsh-token-dashboard .tdb-rrank{",
+			"  flex: none; min-width: 22px; font-family: var(--tdb-mono); font-size: 10.5px; font-weight: 700;",
+			"  color: var(--tdb-fg-faint); font-variant-numeric: tabular-nums;",
+			"}",
+			"dsh-token-dashboard .tdb-ritem:first-child .tdb-rrank{ color: var(--tdb-accent-in); }",
+			"dsh-token-dashboard .tdb-rname{",
+			"  font-family: var(--tdb-mono); font-size: 11.5px; font-weight: 600; color: var(--tdb-fg);",
+			"  min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;",
+			"}",
+			"dsh-token-dashboard .tdb-rtotal{ margin-left: auto; font-family: var(--tdb-mono); font-size: 11.5px; color: var(--tdb-accent-ctx); white-space: nowrap; }",
+			"dsh-token-dashboard .tdb-rpct{ font-family: var(--tdb-mono); font-size: 10.5px; color: var(--tdb-accent-in); white-space: nowrap; }",
+			"dsh-token-dashboard .tdb-rbar{ height: 2px; background: var(--tdb-bg-chart); border-radius: 2px; overflow: hidden; }",
+			"dsh-token-dashboard .tdb-rbar i{",
+			"  display: block; height: 100%; background: linear-gradient(90deg, var(--tdb-accent-in), var(--tdb-accent-out));",
+			"  border-radius: 2px;",
+			"}",
+			"dsh-token-dashboard .tdb-rlist .tdb-empty{ padding: 18px 0; }",
 			"dsh-token-dashboard .tdb-foot{",
 			"  display: flex; align-items: center; gap: 8px; font-size: 10.5px; color: var(--tdb-fg-muted);",
 			"  border-top: 1px solid var(--tdb-border); padding-top: 10px; margin-top: 2px; flex-wrap: wrap;",
@@ -508,12 +540,21 @@ window.__ModuleLoader__.load({
 			"@keyframes tdb-fadein{ from { opacity: 0; transform: translateY(2px); } to { opacity: 1; transform: translateY(0); } }",
 			"dsh-token-dashboard .tdb-body:not([hidden]) .tdb-grid, dsh-token-dashboard .tdb-body:not([hidden]) .tdb-chart, dsh-token-dashboard .tdb-body:not([hidden]) .tdb-foot{ animation: tdb-fadein .2s ease; }",
 		].join("");
-		if (typeof document !== "undefined" && document.querySelector("style[data-plugin-css=\"dsh-token-dashboard/panel.css\"]") === null) {
-			var tag = document.createElement("style");
-			tag.dataset.plugin = "dsh-token-dashboard";
-			tag.dataset.pluginCss = "dsh-token-dashboard/panel.css";
-			tag.textContent = CSS;
-			document.head.appendChild(tag);
+		// CSS 注入是 factory 期唯一的 DOM 副作用，document.head 在异常时机
+		// （脚本在 <head> 解析完成前执行等）可能不可用；注入失败只应让面板
+		// 失去样式，绝不能让整个 bundle 的 factory 抛错。
+		try {
+			if (typeof document !== "undefined" && document.querySelector("style[data-plugin-css=\"dsh-token-dashboard/panel.css\"]") === null) {
+				var tag = document.createElement("style");
+				tag.dataset.plugin = "dsh-token-dashboard";
+				tag.dataset.pluginCss = "dsh-token-dashboard/panel.css";
+				tag.textContent = CSS;
+				document.head.appendChild(tag);
+			}
+		} catch (err) {
+			try {
+				console.warn("[dsh-token-dashboard] CSS injection failed:", err);
+			} catch { /* 控制台不可用时静默 */ }
 		}
 		//#endregion
 
@@ -643,6 +684,30 @@ window.__ModuleLoader__.load({
 		 * @param {Record<string, unknown>} [config]
 		 */
 		function apply(ctx, config) {
+			// 崩溃防护：前端半边同样不允许把异常抛回宿主。静态 client 插件的
+			// apply 由 cordis 客户端 loader 激活，抛错会让这个插件变成失败条目；
+			// 包一层 try/catch 后，本插件最多「不出现」，不会影响页面与其他插件。
+			try {
+				applyInner(ctx, config);
+			} catch (err) {
+				try {
+					console.warn("[dsh-token-dashboard] disabled after an activation error:", err);
+				} catch { /* 控制台不可用时静默 */ }
+				// applyInner 可能已经把 <dsh-token-dashboard> 挂进了 body，
+				// 半挂载的面板会留下一个死控件；这里按标签名清理。
+				try {
+					if (typeof document !== "undefined") {
+						var stale = document.querySelectorAll("dsh-token-dashboard");
+						for (var si = 0; si < stale.length; si++) {
+							if (stale[si].parentNode) stale[si].parentNode.removeChild(stale[si]);
+						}
+					}
+				} catch { /* 清理失败不再抛 */ }
+			}
+		}
+
+		/** 前端真实主体（由 {@link apply} 包一层崩溃防护后调用）。 */
+		function applyInner(ctx, config) {
 			config = config || {};
 			var apiPath = typeof config.apiPath === "string" && config.apiPath !== "" ? config.apiPath : "/token-dashboard/api";
 			var refreshMs = Number(config.refreshMs) > 0 ? Number(config.refreshMs) : 2500;
@@ -651,7 +716,7 @@ window.__ModuleLoader__.load({
 			var error = null;       // 最近一次 fetch 的错误文本
 			var collapsed = readStore("collapsed", "1") === "1";
 			var range = readStore("range", "all");
-			if (["all", "30d", "7d", "1d", "1h"].indexOf(range) === -1) range = "all";
+			if (["all", "30d", "7d", "1d", "12h", "1h"].indexOf(range) === -1) range = "all";
 			var pos = null;         // 拖拽位置 {x,y}；null → 默认角落
 			try {
 				var rawPos = readStore("pos", "");
@@ -678,6 +743,7 @@ window.__ModuleLoader__.load({
 				"      <button type=\"button\" class=\"tdb-rag\" data-range=\"30d\">1月</button>",
 				"      <button type=\"button\" class=\"tdb-rag\" data-range=\"7d\">1周</button>",
 				"      <button type=\"button\" class=\"tdb-rag\" data-range=\"1d\">1天</button>",
+				"      <button type=\"button\" class=\"tdb-rag\" data-range=\"12h\">12小时</button>",
 				"      <button type=\"button\" class=\"tdb-rag\" data-range=\"1h\">1小时</button>",
 				"    </div>",
 				"    <div class=\"tdb-tabs\" role=\"tablist\" aria-label=\"视图\">",
@@ -728,8 +794,12 @@ window.__ModuleLoader__.load({
 				"          <button type=\"button\" data-metric=\"calls\">调用次数</button>",
 				"        </span><span class=\"tdb-c1-legend\"></span></div>",
 				"        <div class=\"tdb-chart-wrap\"><div class=\"tdb-c1\"><div class=\"tdb-empty\">暂无趋势数据</div></div><div class=\"tdb-tip\" role=\"tooltip\"></div></div>",
-				"        <div class=\"tdb-clabel\"><span>每小时总消耗</span><span class=\"tdb-c2-legend\"></span></div>",
+				"        <div class=\"tdb-clabel\"><span class=\"tdb-c2-label\">每小时总消耗</span><span class=\"tdb-c2-legend\"></span></div>",
 				"        <div class=\"tdb-chart-wrap\"><div class=\"tdb-c2\"><div class=\"tdb-empty\">暂无消耗数据</div></div><div class=\"tdb-tip\" role=\"tooltip\"></div></div>",
+				"      </div>",
+				"      <div class=\"tdb-rank\">",
+				"        <div class=\"tdb-clabel\"><span>会话消耗排名</span><span class=\"tdb-rleg\"></span></div>",
+				"        <div class=\"tdb-rlist\"><div class=\"tdb-empty\">暂无会话数据</div></div>",
 				"      </div>",
 				"    </div>",
 				"    <div class=\"tdb-pane tdb-pane-deepseek\" hidden=\"\">",
@@ -741,6 +811,7 @@ window.__ModuleLoader__.load({
 				"      </div>",
 				"      <div class=\"tdb-ds-consumed\">",
 				"        <div class=\"tdb-cell tdb-c-cr\" title=\"近1小时余额消耗\"><b class=\"tdb-ds-c-h1\">—</b><span>1小时</span></div>",
+				"        <div class=\"tdb-cell tdb-c-cw\" title=\"近12小时余额消耗\"><b class=\"tdb-ds-c-h12\">—</b><span>12小时</span></div>",
 				"        <div class=\"tdb-cell tdb-c-in\" title=\"近24小时余额消耗\"><b class=\"tdb-ds-c-d1\">—</b><span>24小时</span></div>",
 				"        <div class=\"tdb-cell tdb-c-out\" title=\"近7天余额消耗\"><b class=\"tdb-ds-c-d7\">—</b><span>7天</span></div>",
 				"        <div class=\"tdb-cell tdb-c-ctx\" title=\"自监控以来余额消耗\"><b class=\"tdb-ds-c-all\">—</b><span>累计</span></div>",
@@ -797,6 +868,8 @@ window.__ModuleLoader__.load({
 			var c2Tip = c2Wrap.querySelector(".tdb-tip");
 			var c1leg = root.querySelector(".tdb-c1-legend");
 			var c2leg = root.querySelector(".tdb-c2-legend");
+			var rListEl = root.querySelector(".tdb-pane-session .tdb-rlist");
+			var rLegEl = root.querySelector(".tdb-pane-session .tdb-rleg");
 			var selId = readStore("session", "");
 			/** 自动跟随最近活动的会话（默认开启）。 */
 			var follow = readStore("follow", "1") === "1";
@@ -825,6 +898,7 @@ window.__ModuleLoader__.load({
 			var smBarsTip = smBarsEl.parentElement.querySelector(".tdb-tip");
 			var smBarsLeg = root.querySelector(".tdb-pane-summary .tdb-bleg");
 			var smBarsLabel = root.querySelector(".tdb-pane-summary .tdb-blabel");
+			var c2Label = root.querySelector(".tdb-pane-session .tdb-c2-label");
 			/** 每日柱状图的显示模式："stack" = 按模型堆叠（默认），
 			 *  "total" = 单一总量柱。与其他视图偏好一样持久化。 */
 			var barMode = readStore("barmode", "stack");
@@ -840,7 +914,7 @@ window.__ModuleLoader__.load({
 			var dsEls = {};
 			[["total", ".tdb-ds-total"], ["granted", ".tdb-ds-granted"], ["topped", ".tdb-ds-topped"]].forEach(function (p) { dsEls[p[0]] = root.querySelector(p[1]); });
 			var dsC = {};
-			[["h1", ".tdb-ds-c-h1"], ["d1", ".tdb-ds-c-d1"], ["d7", ".tdb-ds-c-d7"], ["all", ".tdb-ds-c-all"]].forEach(function (p) { dsC[p[0]] = root.querySelector(p[1]); });
+			[["h1", ".tdb-ds-c-h1"], ["h12", ".tdb-ds-c-h12"], ["d1", ".tdb-ds-c-d1"], ["d7", ".tdb-ds-c-d7"], ["all", ".tdb-ds-c-all"]].forEach(function (p) { dsC[p[0]] = root.querySelector(p[1]); });
 			var dsChart = root.querySelector(".tdb-ds-chart");
 			var dsChartWrap = dsChart.parentElement;
 			var dsTip = dsChartWrap.querySelector(".tdb-tip");
@@ -1008,12 +1082,112 @@ window.__ModuleLoader__.load({
 				svg.addEventListener("touchend", onLeave);
 			}
 
-			/** 感知时间范围的横轴标签：1h 用分钟，1d/7d 用小时，30d/全部用天。 */
-			var tf = function (ms) { return range === "1h" ? dtMin(ms) : range === "30d" || range === "all" ? dtDay(ms) : dtHour(ms); };
-			/** 趋势点单位标签：1h「分」、1d/7d「时」、30d/全部「天」。随 range
+			/** 柱状图 tooltip 的浮窗定位：贴在光标侧边（右侧优先，右侧放不下
+			 *  翻到左侧），纵向按光标居中并夹在可见范围内。气泡不再「居中钉在
+			 *  光标所在的那根柱子上」——那样会把鼠标还要看的其余柱子整片挡住，
+			 *  越是靠右的柱子越明显。
+			 *  纵向不能只夹在柱状图内：气泡比 84px 高的柱状图更高，那样夹的
+			 *  结果永远是停在图表顶部；也不能只夹在面板内——真正的裁剪边界是
+			 *  可滚动的 .tdb-body（overflow-y: auto，越界会被裁掉），所以按
+			 *  wrap 与各 bounds 元素可见矩形的交集来夹。 */
+			function placeBarsTip(tip, wrapEl, boundsEls, clientX, clientY) {
+				var wrapRect = wrapEl.getBoundingClientRect();
+				var tipRect = tip.getBoundingClientRect();
+				var gap = 14;
+				// 横向：贴光标侧边，右侧放不下就翻到左侧，再夹回柱状图内。
+				var left = clientX + gap;
+				if (left + tipRect.width > wrapRect.right - 2) left = clientX - gap - tipRect.width;
+				var leftMin = wrapRect.left + 2;
+				var leftMax = Math.max(leftMin, wrapRect.right - tipRect.width - 2);
+				left = Math.max(leftMin, Math.min(leftMax, left));
+				// 纵向：光标处居中，再夹进可见范围。
+				var top = clientY - tipRect.height / 2;
+				var topMin = wrapRect.top + 2;
+				var topMax = wrapRect.bottom - tipRect.height - 2;
+				for (var bi = 0; boundsEls && bi < boundsEls.length; bi++) {
+					if (!boundsEls[bi]) continue;
+					var boundsRect = boundsEls[bi].getBoundingClientRect();
+					if (boundsRect.top + 2 > topMin) topMin = boundsRect.top + 2;
+					var boundsMax = boundsRect.bottom - tipRect.height - 2;
+					if (boundsMax < topMax) topMax = boundsMax;
+				}
+				topMax = Math.max(topMin, topMax);
+				top = Math.max(topMin, Math.min(topMax, top));
+				tip.style.left = Math.round(left - wrapRect.left) + "px";
+				tip.style.top = Math.round(top - wrapRect.top) + "px";
+			}
+
+			/** 感知时间范围的横轴标签：1h/12h 用分钟，1d/7d 用小时，30d/全部用天。 */
+			var tf = function (ms) { return range === "1h" || range === "12h" ? dtMin(ms) : range === "30d" || range === "all" ? dtDay(ms) : dtHour(ms); };
+			/** 趋势点单位标签：1h/12h「分」、1d/7d「时」、30d/全部「天」。随 range
 			 *  动态计算：因为用户切换范围后 legend 需立即反映新的时间粒度
 			 *  （不能只在加载时求值一次，否则 1h → 30d 后单位会卡在「分」）。 */
-			var slotUnit = function () { return range === "1h" ? " 分" : range === "30d" || range === "all" ? " 天" : " 时"; };
+			var slotUnit = function () { return range === "1h" || range === "12h" ? " 分" : range === "30d" || range === "all" ? " 天" : " 时"; };
+
+			/** 渲染当前时间范围内的会话消耗排名：按整体消耗降序，只列窗口内
+			 *  确有消耗的会话。数据直接取 payload.sessions[].totals——服务端
+			 *  已按所选 range 切好（仅保留窗口内有贡献的会话），因此排名随顶部
+			 *  时间范围联动；它不读「选择会话」下拉，那个下拉只管上方指标卡
+			 *  与两张走势图。口径与上方指标卡一致：整体消耗 = 输入 + 缓存读
+			 *  + 缓存写 + 输出。纯展示，不绑定点击。 */
+			function renderSessionRank() {
+				var list = data && Array.isArray(data.sessions) ? data.sessions : [];
+				var rows = [];
+				var grand = 0;
+				for (var i = 0; i < list.length; i++) {
+					var t0 = list[i].totals || {};
+					var v0 = overall(t0);
+					if (v0 <= 0) continue; // 窗口内无消耗的会话不入榜
+					grand += v0;
+					rows.push({ s: list[i], t: t0, v: v0, idx: i });
+				}
+				if (rows.length === 0) {
+					rListEl.innerHTML = '<div class="tdb-empty">当前时间范围内暂无会话消耗</div>';
+					rLegEl.textContent = "";
+					return;
+				}
+				rows.sort(function (a, b) { return b.v - a.v; });
+				rLegEl.textContent = rows.length + " 个会话 · 合计 " + fmt(grand) + " tok";
+				// 条形长度按榜首归一（排名图惯例：第一名满格），百分比仍按
+				// 窗口内全部会话的合计计算，与汇总页模型卡片的口径一致。
+				var max = rows[0].v;
+				var noCw = data.hasCacheWrite === false;
+				var out = [];
+				for (var r = 0; r < rows.length; r++) {
+					var row = rows[r];
+					var s = row.s;
+					var t = row.t;
+					var share = grand > 0 ? (row.v / grand) * 100 : 0;
+					var calls = typeof t.calls === "number" ? t.calls : null;
+					var tip = "会话 ID: " + s.id +
+						(s.cwd ? "\n目录: " + s.cwd : "") +
+						(s.preset ? "\n预设: " + s.preset : "") +
+						"\n输入 " + fmt(t.uncached) + " / 缓存读 " + fmt(t.cacheRead) +
+						" / 缓存写 " + (noCw ? "未上报" : fmt(t.cacheWrite)) +
+						" / 输出 " + fmt(t.output) +
+						" / 调用 " + (calls === null ? "未上报" : calls + " 次") +
+						"\n占窗口总消耗 " + share.toFixed(1) + "%";
+					out.push(
+						'<div class="tdb-ritem" title="' + esc(tip) + '">' +
+						'<div class="tdb-rtop">' +
+						'<span class="tdb-rrank">#' + (r + 1) + '</span>' +
+						'<span class="tdb-rname">' + esc(sessionLabel(s, row.idx)) + '</span>' +
+						'<span class="tdb-rtotal" title="总消耗（输入 + 缓存读写 + 输出）">' + fmt(row.v) + ' tok</span>' +
+						'<span class="tdb-rpct">' + share.toFixed(1) + '%</span>' +
+						'</div>' +
+						'<div class="tdb-mstats">' +
+						'<span class="tdb-mstat tdb-ms-in" title="输入 · 未缓存"><i>入</i><b>' + fmt(t.uncached) + '</b></span>' +
+						'<span class="tdb-mstat tdb-ms-cr" title="缓存读取"><i>读</i><b>' + fmt(t.cacheRead) + '</b></span>' +
+						'<span class="tdb-mstat tdb-ms-cw" title="' + (noCw ? "数据源未上报缓存写入" : "缓存写入") + '"><i>写</i><b>' + (noCw ? "—" : fmt(t.cacheWrite)) + '</b></span>' +
+						'<span class="tdb-mstat tdb-ms-out" title="输出"><i>出</i><b>' + fmt(t.output) + '</b></span>' +
+						'<span class="tdb-mstat tdb-ms-calls" title="' + (calls === null ? "数据源未上报调用次数" : "当前时间范围内该会话的 API 调用次数") + '"><i>调</i><b>' + (calls === null ? "—" : String(calls)) + '</b></span>' +
+						'</div>' +
+						'<div class="tdb-rbar"><i style="width:' + Math.min(100, Math.max(0.5, (row.v / max) * 100)).toFixed(2) + '%"></i></div>' +
+						'</div>'
+					);
+				}
+				rListEl.innerHTML = out.join("");
+			}
 
 			/** 渲染某个会话的会话面板。 */
 			function renderPaneSession(session) {
@@ -1023,6 +1197,8 @@ window.__ModuleLoader__.load({
 					c1.innerHTML = '<div class="tdb-empty">暂无趋势数据</div>';
 					c2.innerHTML = '<div class="tdb-empty">暂无消耗数据</div>';
 					c1leg.textContent = c2leg.textContent = "";
+					if (c2Label) c2Label.textContent = (range === "1h" || range === "12h") ? "每分钟总消耗" : (range === "30d" || range === "all") ? "每日总消耗" : "每小时总消耗";
+					renderSessionRank(); // 未选中会话时排名仍应可用
 					return;
 				}
 				var totals = session.totals || {};
@@ -1059,6 +1235,9 @@ window.__ModuleLoader__.load({
 				// 缓存写入 + 输出）。
 				var totalVals = series.map(function (s) { return s.in + s.cr + (s.cw || 0) + s.out; });
 				renderMetricChart(c1, c1leg, series, sMetric);
+				// 第二张图的标题跟随当前范围的时间粒度（1h/12h 逐分钟、
+				// 1d/7d 每小时、30d/全部 每天），与横轴标签保持一致。
+				if (c2Label) c2Label.textContent = (range === "1h" || range === "12h") ? "每分钟总消耗" : (range === "30d" || range === "all") ? "每日总消耗" : "每小时总消耗";
 				renderChart(c2, c2leg, totalVals, {
 					color: "var(--tdb-accent-in)",
 					unit: "tok",
@@ -1071,6 +1250,7 @@ window.__ModuleLoader__.load({
 					},
 					emptyMsg: "暂无消耗数据",
 				});
+				renderSessionRank();
 			}
 
 			/** 渲染汇总页的模型明细：提供商可折叠分组 + 搜索/筛选
@@ -1219,12 +1399,18 @@ window.__ModuleLoader__.load({
 					}
 				}
 				// ── 每日柱状图：数据取当前范围的 series（30d/全部时服务端已按天
-				//  分桶；7d/1d 按小时、1h 按分钟，标签相应变化）。 ──
+				//  分桶；7d/1d 按小时、1h/12h 按分钟，标签相应变化）。 ──
 				var series = data && Array.isArray(data.series) ? data.series : [];
 				var perDay = range === "30d" || range === "all";
-				var perMin = range === "1h";
+				var perMin = range === "1h" || range === "12h";
 				var unitLbl = perDay ? "天" : perMin ? "分钟" : "小时";
 				if (smBarsLabel) smBarsLabel.textContent = perDay ? "每日总消耗" : perMin ? "每分钟总消耗" : "每小时总消耗";
+				// 槽位极多时（12h 逐分钟约 721 格）柱间 1px 间隙会吃掉整个容器宽度，
+				// 把每根柱压成 0 宽，切换为无间隙让柱本身占满宽度。阀值只在高密度
+				// 范围命中，其余范围的观感不变。该 class 每次渲染重设，范围切回
+				// 小时/天后自动移除。
+				if (series.length > 200) smBarsEl.classList.add("tdb-dense");
+				else smBarsEl.classList.remove("tdb-dense");
 				smBarsEl.innerHTML = "";
 				smBarsLeg.innerHTML = "";
 				var grandVals = series.map(function (s) { return (s.in || 0) + (s.cr || 0) + (s.cw || 0) + (s.out || 0); });
@@ -1297,11 +1483,7 @@ window.__ModuleLoader__.load({
 							rows +
 							'<span class="tdb-tip-detail">入 ' + fmt(s.in) + " · 读 " + fmt(s.cr) + " · 写 " + fmt(s.cw || 0) + " · 出 " + fmt(s.out) + "</span>" +
 							(typeof s.calls === "number" ? '<span class="tdb-tip-detail">调用 ' + s.calls + " 次</span>" : "");
-						var tipRect = smBarsTip.getBoundingClientRect();
-						var px = Math.max(2, Math.min(rect.width - tipRect.width - 2, x - tipRect.width / 2));
-						var py = Math.max(0, Math.min(rect.height - tipRect.height - 2, 8));
-						smBarsTip.style.left = px + "px";
-						smBarsTip.style.top = py + "px";
+						placeBarsTip(smBarsTip, smBarsEl, [bodyEl, panel], ev.clientX, ev.clientY);
 						smBarsTip.classList.add("show");
 					};
 					var onBarLeave = function () { smBarsTip.classList.remove("show"); };
@@ -1345,11 +1527,7 @@ window.__ModuleLoader__.load({
 								'<span class="tdb-tip-time">' + tf(s.t) + "</span>" +
 								'<span class="tdb-tip-detail">入 ' + fmt(s.in) + " · 读 " + fmt(s.cr) + " · 写 " + fmt(s.cw || 0) + " · 出 " + fmt(s.out) + "</span>" +
 								(typeof s.calls === "number" ? '<span class="tdb-tip-detail">调用 ' + s.calls + " 次</span>" : "");
-						var tipRect = smBarsTip.getBoundingClientRect();
-						var px = Math.max(2, Math.min(rect.width - tipRect.width - 2, x - tipRect.width / 2));
-						var py = Math.max(0, Math.min(rect.height - tipRect.height - 2, 8));
-						smBarsTip.style.left = px + "px";
-						smBarsTip.style.top = py + "px";
+						placeBarsTip(smBarsTip, smBarsEl, [bodyEl, panel], ev.clientX, ev.clientY);
 						smBarsTip.classList.add("show");
 					};
 					var onBarLeave2 = function () { smBarsTip.classList.remove("show"); };
@@ -1444,7 +1622,7 @@ window.__ModuleLoader__.load({
 				// 下降量，充值/赠送到账不计为消耗，因此不会为负；窗口边界
 				// 跨采样段时按时间占比折算（近似）。
 				var c = b && b.consumed ? b.consumed : null;
-				var cKeys = [["h1", "近1小时"], ["d1", "近24小时"], ["d7", "近7天"], ["all", "自监控以来"]];
+				var cKeys = [["h1", "近1小时"], ["h12", "近12小时"], ["d1", "近24小时"], ["d7", "近7天"], ["all", "自监控以来"]];
 				for (var ci = 0; ci < cKeys.length; ci++) {
 					var ck = cKeys[ci][0];
 					var cv = c && typeof c[ck] === "number" ? Math.max(0, c[ck]) : null;
@@ -1532,8 +1710,27 @@ window.__ModuleLoader__.load({
 				dsMeta.textContent = b && b.fetchedAt ? "上次获取 " + clock(b.fetchedAt) + " · 整点/半点采样 · 历史已持久化，重启保留" : "—";
 			}
 
-			/** 根据 `data` 重新渲染所有内容。 */
+			/** 渲染失败的兜底：渲染本身绝不能冒泡到轮询循环与事件回调，否则一次
+			 *  坏数据就会让整个面板（连带后续每次刷新）永久停摆。降级为面板内提示。
+			 *  render() 是安全包装，真正的渲染实现在 renderInner()。 */
 			function render() {
+				try {
+					renderInner();
+				} catch (err) {
+					try {
+						console.warn("[dsh-token-dashboard] render failed:", err);
+					} catch { /* 控制台不可用时静默 */ }
+					try {
+						statusEl.textContent = "渲染失败";
+						statusEl.className = "tdb-status tdb-status-err";
+						dot.className = "tdb-dot idle";
+						if (smListEl) smListEl.innerHTML = '<div class="tdb-empty">渲染失败：数据格式与当前插件版本不匹配</div>';
+					} catch { /* 连兜底提示都失败则彻底放弃本次渲染 */ }
+				}
+			}
+
+			/** 根据 `data` 重新渲染所有内容（由 render() 包崩溃防护）。 */
+			function renderInner() {
 				if (error) {
 					statusEl.textContent = "连接失败";
 					statusEl.className = "tdb-status tdb-status-err";
@@ -1623,14 +1820,16 @@ window.__ModuleLoader__.load({
 			// summary/汇总：当前所选时间范围的窗口汇总；session/会话：当前选中会话；
 			// deepseek/DeepSeek：官方余额。
 			miniEl.classList.toggle("err", !!error);
-			var rangeLabel = range === "all" ? "全部" : range === "30d" ? "1月" : range === "7d" ? "1周" : range === "1d" ? "1天" : "1小时";
+			var rangeLabel = range === "all" ? "全部" : range === "30d" ? "1月" : range === "7d" ? "1周" : range === "1d" ? "1天" : range === "12h" ? "12小时" : "1小时";
 			var mB = {};
 			[["total", ".tdb-mv-total"], ["in", ".tdb-mv-in"], ["out", ".tdb-mv-out"], ["cr", ".tdb-mv-cr"], ["hit", ".tdb-mv-hit"], ["calls", ".tdb-mv-calls"]].forEach(function (p) { mB[p[0]] = miniEl.querySelector(p[1]); });
 			var mLabelEls = {};
 			[["total", ".tdb-mc-total"], ["in", ".tdb-mc-in"], ["out", ".tdb-mc-out"], ["cr", ".tdb-mc-cr"], ["hit", ".tdb-mc-hit"], ["calls", ".tdb-mc-calls"]].forEach(function (p) { mLabelEls[p[0]] = miniEl.querySelector(p[1] + " .tdb-ml"); });
 			// 胶囊标签：deepseek 余额模式下切换为余额相关标签，其余标签页恢复 token 标签。
 			var mTokenLabels = { total: "总计", in: "输入", out: "输出", cr: "缓存", hit: "命中", calls: "调用" };
-			var mBalanceLabels = { total: "余额", in: "赠送", out: "充值", cr: "1h耗", hit: "24h耗", calls: "累计耗" };
+			// 余额胶囊只有 6 格，装不下 1h/12h/24h/7天/累计 五档；折叠态取
+			// 最近的三档（1h/12h/24h），7天与累计在展开的余额页查看。
+			var mBalanceLabels = { total: "余额", in: "赠送", out: "充值", cr: "1h耗", hit: "12h耗", calls: "24h耗" };
 			// 汇总页胶囊显示当前所选时间范围的窗口汇总（选 1天 = 最近一天，
 			// 选 1月 = 最近一月），不再是四个滚动窗口的累计对比。
 			var mSummaryLabels = { total: rangeLabel, in: "输入", out: "输出", cr: "缓存", hit: "命中", calls: "调用" };
@@ -1707,10 +1906,10 @@ window.__ModuleLoader__.load({
 				mB.out.parentElement.title = "充值余额";
 				mB.cr.textContent = fmtC(dC ? dC.h1 : null);
 				mB.cr.parentElement.title = "近1小时余额消耗";
-				mB.hit.textContent = fmtC(dC ? dC.d1 : null);
-				mB.hit.parentElement.title = "近24小时余额消耗";
-				mB.calls.textContent = fmtC(dC ? dC.all : null);
-				mB.calls.parentElement.title = "自监控以来余额消耗";
+				mB.hit.textContent = fmtC(dC ? dC.h12 : null);
+				mB.hit.parentElement.title = "近12小时余额消耗";
+				mB.calls.textContent = fmtC(dC ? dC.d1 : null);
+				mB.calls.parentElement.title = "近24小时余额消耗";
 			}
 			}
 
@@ -2050,7 +2249,19 @@ window.__ModuleLoader__.load({
 			syncLayout();
 			render();
 			refreshNow();
-			timer = setInterval(refresh, refreshMs);
+			// 定时器回调必须自己吞掉异常：setInterval 不会消费 refresh() 返回的
+			// promise，漏出的 rejection 在浏览器里是一类难查的噪音，且会让本轮
+			// 之后的逻辑（若有）静默中断。
+			timer = setInterval(function () {
+				try {
+					var p = refresh();
+					if (p && typeof p.catch === "function") p.catch(function () {});
+				} catch (err) {
+					try {
+						console.warn("[dsh-token-dashboard] poll tick failed:", err);
+					} catch { /* 控制台不可用时静默 */ }
+				}
+			}, refreshMs);
 
 			ctx.effect(function* () {
 				yield function dispose() {
