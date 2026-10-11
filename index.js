@@ -40,6 +40,10 @@ export const name = "dsh-token-dashboard";
 const DEFAULT_API_PATH = "/token-dashboard/api";
 const DEFAULT_SERIES_SIZE = 600;
 const BACKFILL_REFRESH_MS = 5 * 60 * 1000;
+/** 折叠算法版本。fork 继承前缀口径变更时递增——回填的幂等判据是文件
+ *  mtime，不带版本号的话，同一进程内按旧口径折叠出的会话会被永久保留
+ *  （mtime 未变即跳过重算）。 */
+const FOLD_VERSION = 2;
 
 /** @param {unknown} value */
 function clampInt(value, min, max, fallback) {
@@ -162,6 +166,12 @@ function newSessionState(id) {
 		hasCacheWrite: false,
 		/** 上次折叠该状态时 JSONL 的 mtimeMs。 */
 		sourceMtime: 0,
+		/** 折叠出该状态所用的算法版本（见 FOLD_VERSION）。 */
+		foldVersion: FOLD_VERSION,
+		/** 该会话是否为 fork/seed 出的子会话（头部带血缘）。 */
+		seeded: false,
+		/** 继承前缀在自身事件流中的条数；非 seeded 会话为 0。用于 UI 标注。 */
+		inheritedEvents: 0,
 	};
 }
 
@@ -441,9 +451,72 @@ function foldEvent(state, event) {
 
 //#region 回填——扫描持久化会话日志，把每个事件回放进状态映射。
 /**
+ * 解析会话事件流中 fork 继承前缀的结束位置：**该位置之前的事件是从父会话
+ * 原样复制的，必须在统计时跳过**，否则 fork 子会话会把父会话的历史用量再计
+ * 一遍（实测本机 11 个 fork 会话虚增约 2.6 亿 token，个别子会话自身只用了
+ * 800 万却被显示成 1.2 亿）。
+ *
+ * `@deepseek-ai/dsh-session` 的 `buildForkSeed()` 直接 `events.slice()` 源事件
+ * （含每条 `assistant/message` 的 usage），因此子日志里确实物理存在这些事件；
+ * 实时流不受影响——seed 事件从不发布到 `session/event`，所以只有回填路径
+ * 会重复计。
+ *
+ * 两代格式的切点标记不同，但都按**文件中的位置**定位：
+ *   - v0：头部 `seedLength` 是继承前缀的 **seq 上界（exclusive）**，不是事件
+ *     条数。v0 会丢弃部分事件，所以文件里的条数远小于该值（实测 47457 对
+ *     应 5280 条），且 seq 保留父会话的原始编号且有空洞。因此判据是「第一条
+ *     seq >= seedLength 的事件的位置」。已用父子交叉验证：该线以下的
+ *     `assistant/message` 与父会话 (time,turn,step) 100% 重合，以上 0% 重合。
+ *   - v1+：头部 `isSeeded: true`，切点是**最后一条**带
+ *     `data.inherited === true` 的 `session/end-seed` 事件的下一条。
+ *
+ * 注意：普通未 fork 的会话同样会写裸 `session/end-seed {}`（本机 544 条），
+ * 因此判据必须是 `inherited === true`，只看事件类型会误伤全部普通会话。
+ *
+ * @param {object} header 会话头对象
+ * @param {Array<object>} events 头部之后的事件，按文件顺序
+ * @returns {number} 继承前缀的事件条数（即自身事件起始下标）；非 seeded 会话为 0
+ */
+function resolveInheritedCut(header, events) {
+	if (header && typeof header === "object") {
+		const seedLength = header.seedLength;
+		if (typeof seedLength === "number" && Number.isFinite(seedLength) && seedLength > 0) {
+			for (let i = 0; i < events.length; i++) {
+				const seq = events[i] && events[i].seq;
+				if (typeof seq === "number" && seq >= seedLength) return i;
+			}
+			// 该文件没有任何带 seq 的事件（不应出现）：若声明的继承上界不小于
+			// 事件总数，说明整个文件都可能是继承内容，按全部继承处理；否则
+			// 退回把 seedLength 当条数（旧语义），两种都只在异常文件上生效。
+			return seedLength >= events.length ? events.length : Math.trunc(seedLength);
+		}
+	}
+	if (!header || header.isSeeded !== true) return 0;
+	// 取最后一条 inherited 标记：`Session` 构造保证它是最终继承边界。
+	// `buildForkSeed()` 先复制 boundary+1 条源事件，再把标记以
+	// `seq = boundary + 1` 追加在后，且 `inheritedEventCount = boundary + 1`——
+	// 即标记的 seq 恰好等于**被复制源事件的条数**，在连贯日志里就等于它的
+	// 数组下标。因此自身事件从标记所在下标开始（标记本体由构造追加、不带
+	// usage，折叠与否都不影响用量）。
+	let markerIndex = -1;
+	for (let i = 0; i < events.length; i++) {
+		const event = events[i];
+		if (
+			event && typeof event === "object" &&
+			event.type === "session/end-seed" &&
+			event.data && typeof event.data === "object" &&
+			event.data.inherited === true
+		) {
+			markerIndex = i;
+		}
+	}
+	return markerIndex >= 0 ? markerIndex : 0;
+}
+
+/**
  * 把单个 `.jsonl.zstd` 解析为头部 + 事件。当文件缺失、不可读或
  * 无法扫描时返回 null。
- * @returns {{ id: string, cwd: string | undefined, events: Array<object>, mtimeMs: number } | null}
+ * @returns {{ id: string, cwd: string | undefined, preset: string | undefined, createdAt: number | undefined, events: Array<object>, mtimeMs: number, isSeeded: boolean, inheritedCut: number } | null}
  */
 function readHeaderAndEvents(filePath, logger) {
 	let buffer;
@@ -459,6 +532,8 @@ function readHeaderAndEvents(filePath, logger) {
 	let headerCwd;
 	let headerPreset;
 	let headerCreatedAt;
+	let headerIsSeeded = false;
+	let headerSeedLength = 0;
 	for (let i = 0; i < frames.length; i++) {
 		const f = frames[i];
 		try {
@@ -481,6 +556,8 @@ function readHeaderAndEvents(filePath, logger) {
 					headerCwd = typeof parsed.cwd === "string" ? parsed.cwd : undefined;
 					headerPreset = typeof parsed.agentPreset === "string" ? parsed.agentPreset : undefined;
 					headerCreatedAt = typeof parsed.createdAt === "number" ? parsed.createdAt : undefined;
+					headerIsSeeded = parsed.isSeeded === true;
+					headerSeedLength = typeof parsed.seedLength === "number" ? parsed.seedLength : 0;
 				} else {
 					decoded.push(parsed);
 				}
@@ -497,7 +574,19 @@ function readHeaderAndEvents(filePath, logger) {
 	} catch {
 		/* 回退为 0，这样下次回填总会重新折叠 */
 	}
-	return { id: headerId, cwd: headerCwd, preset: headerPreset, createdAt: headerCreatedAt, events: decoded, mtimeMs };
+	return {
+		id: headerId,
+		cwd: headerCwd,
+		preset: headerPreset,
+		createdAt: headerCreatedAt,
+		events: decoded,
+		mtimeMs,
+		isSeeded: headerIsSeeded || headerSeedLength > 0,
+		inheritedCut: resolveInheritedCut(
+			{ isSeeded: headerIsSeeded, seedLength: headerSeedLength },
+			decoded
+		),
+	};
 }
 
 /**
@@ -513,7 +602,11 @@ function backfillOne(sessions, filePath, seriesSize, logger) {
 	const parsed = readHeaderAndEvents(filePath, logger);
 	if (parsed === null) return { folded: false, samples: 0, errored: true };
 	const existing = sessions.get(parsed.id);
-	if (existing !== undefined && existing.sourceMtime >= parsed.mtimeMs) {
+	if (
+		existing !== undefined &&
+		existing.sourceMtime >= parsed.mtimeMs &&
+		existing.foldVersion === FOLD_VERSION
+	) {
 		return { folded: false, samples: existing.series.length, errored: false };
 	}
 	const state = newSessionState(parsed.id);
@@ -521,7 +614,13 @@ function backfillOne(sessions, filePath, seriesSize, logger) {
 	state.preset = parsed.preset ?? null;
 	state.createdAt = parsed.createdAt ?? null;
 	state.sourceMtime = parsed.mtimeMs;
-	for (const ev of parsed.events) foldEvent(state, ev);
+	state.seeded = parsed.isSeeded;
+	// fork 子会话的日志把父会话事件原样复制在开头，只有切点之后的事件
+	// 才是该会话自己的用量。跳过继承前缀，避免把父会话的历史再计一遍。
+	const events = parsed.events;
+	const cut = state.seeded ? Math.min(parsed.inheritedCut, events.length) : 0;
+	state.inheritedEvents = cut;
+	for (let i = cut; i < events.length; i++) foldEvent(state, events[i]);
 	if (state.lastSample !== null) flushLastSample(state, state.updatedAt ?? Date.now(), false);
 	if (state.series.length > seriesSize) state.series.splice(0, state.series.length - seriesSize);
 	sessions.set(parsed.id, state);
@@ -1243,7 +1342,15 @@ function applyPlugin(ctx, config = {}, timers = { refresh: null, balance: null }
 			if (typeof header.cwd === "string") state.cwd = header.cwd;
 			if (typeof header.agentPreset === "string") state.preset = header.agentPreset;
 			if (typeof header.createdAt === "number") state.createdAt = header.createdAt;
+			// fork 血缘：seeded 会话的继承前缀此时尚未回填到该 state，
+			// 但标记要立即生效，UI 才能正确标注（口径与回填路径一致）。
+			if (header.isSeeded === true || (typeof header.seedLength === "number" && header.seedLength > 0)) {
+				state.seeded = true;
+			}
 		}
+		// `dsh-session` 保证 seed 事件从不发布到 `session/event`，因此这里
+		// 只会收到子会话自己的事件，无需再按切点过滤。上面记录血缘仅用于
+		// 展示标注；若未来 DSH 改变该保证，回填路径仍是权威口径。
 		foldEvent(state, event);
 		if (state.series.length > seriesSize) state.series.splice(0, state.series.length - seriesSize);
 	});
@@ -1271,6 +1378,10 @@ function applyPlugin(ctx, config = {}, timers = { refresh: null, balance: null }
 					title: state.title,
 					preset: state.preset,
 					createdAt: state.createdAt,
+					// fork/seed 子会话：totals/series 只含该会话自身的用量，
+					// 继承自父会话的前缀已排除；UI 据此加标注避免误读。
+					seeded: state.seeded === true,
+					inheritedEvents: state.inheritedEvents ?? 0,
 					// 当前所选范围内的窗口内总量。
 					totals,
 					stats: state.stats,
@@ -1450,6 +1561,8 @@ export const _internal = {
 	flushLastSample,
 	scanZstdFrames,
 	readHeaderAndEvents,
+	resolveInheritedCut,
+	FOLD_VERSION,
 	backfillOne,
 	backfillAll,
 	rangeToMs,

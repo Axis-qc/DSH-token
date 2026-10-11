@@ -612,8 +612,161 @@ console.log("[2] server half");
 	}
 }
 
-// ── 3. backfill: replay a real durable session log ───────────────────────────
-console.log("[3] backfill against a real session log");
+// ── 3. fork/seed sessions must not double-count the inherited prefix ─────────
+// A forked child's durable log physically contains a copy of the parent's events
+// (dsh-session's buildForkSeed slices the source events verbatim), so a backfill
+// that folds every event counts the parent's history a second time. Measured on
+// real data: 11 forked sessions inflated the global total by ~3.5% and one child
+// that really spent 8.3M showed 123.7M in the session ranking.
+console.log("[3] fork/seed sessions: inherited prefix excluded");
+{
+	try {
+		const { zstdCompressSync } = await import("node:zlib");
+		const module = await import(here("index.js"));
+		const { backfillAll, readHeaderAndEvents, resolveInheritedCut, newSessionState, aggregateWindowTotals } = module._internal;
+
+		const H = 3600000;
+		const now = Date.now();
+		const usage = (t, turn, step, inTok, crTok, outTok) => ({
+			type: "assistant/message",
+			time: t,
+			data: { turn, step, usage: { inputTokens: inTok, cacheReadTokens: crTok, cacheWriteTokens: 0, outputTokens: outTok } },
+		});
+		const writeLog = (dir, lines, fileName = "session.v4.jsonl.zstd") => {
+			mkdirSync(dir, { recursive: true });
+			writeFileSync(join(dir, fileName), zstdCompressSync(Buffer.from(lines.map((l) => JSON.stringify(l)).join("\n") + "\n", "utf8")));
+		};
+
+		// ── 3a. v1+ format: header isSeeded + inherited end-seed marker ──
+		// Parent prefix = 2 turns costing 3000 input / 1000 output in total;
+		// the child's own suffix costs 100 input / 50 output.
+		const root = join(HERE, ".fork-fixture");
+		if (existsSync(root)) rmSync(root, { recursive: true, force: true });
+		const childDir = join(root, "proj", "sess-child");
+		const seq = (n) => n;
+		const childLines = [
+			{ type: "session", version: 4, id: "sess-child", createdAt: now - 3 * H, cwd: "C:\\x", parentSession: "sess-parent", isSeeded: true, delegationDepth: 0, agentPreset: "standard" },
+			usage(now - 3 * H, 1, 1, 1000, 0, 400),
+			{ type: "turn/end", seq: seq(1), time: now - 3 * H + 10 },
+			usage(now - 3 * H + 1000, 2, 1, 2000, 0, 600),
+			{ type: "turn/end", seq: seq(3), time: now - 3 * H + 2000 },
+			{ type: "session/end-seed", seq: seq(4), time: now - 3 * H + 2000, data: { inherited: true } },
+			usage(now - 1 * H, 3, 1, 100, 0, 50),
+			{ type: "turn/end", seq: seq(6), time: now - 1 * H + 10 },
+		];
+		// seqs must be contiguous and match array positions, as real logs are.
+		for (let i = 1; i < childLines.length; i++) childLines[i].seq = seq(i - 1);
+		writeLog(childDir, childLines);
+
+		const parsed = readHeaderAndEvents(join(childDir, "session.v4.jsonl.zstd"), { warn: () => {} });
+		assert.equal(parsed.isSeeded, true, "v4 fork header detected as seeded");
+		// Marker is body index 3 → 4 inherited events (indices 0..3).
+		assert.equal(parsed.inheritedCut, 4, `v1+ marker yields the inherited event count (got ${parsed.inheritedCut})`);
+
+		const sessions = new Map();
+		backfillAll(sessions, root, 600, { info: () => {}, warn: () => {} });
+		const child = sessions.get("sess-child");
+		assert.ok(child, "forked child folded");
+		assert.equal(child.seeded, true, "child marked seeded");
+		assert.equal(child.inheritedEvents, 4, "child records how many events were skipped");
+		assert.equal(child.totals.uncached, 100, `only the child's own input is counted (got ${child.totals.uncached})`);
+		assert.equal(child.totals.output, 50, `only the child's own output is counted (got ${child.totals.output})`);
+		assert.equal(child.totals.uncached + child.totals.cacheRead + child.totals.cacheWrite + child.totals.output, 150, "inherited 4000 tokens are excluded");
+		ok("v1+ fork: inherited prefix excluded, child totals = own suffix only");
+
+		// ── 3b. unseeded sessions still fold everything ──
+		// Guard against over-correction: an ordinary session also writes a bare
+		// `session/end-seed {}` (544 such events measured locally), which must NOT
+		// be treated as an inherited cut.
+		const plainDir = join(root, "proj", "sess-plain");
+		const plainLines = [
+			{ type: "session", version: 4, id: "sess-plain", createdAt: now - 2 * H, cwd: "C:\\y", isSeeded: false, delegationDepth: 0 },
+			usage(now - 2 * H, 1, 1, 11, 0, 7),
+			{ type: "session/end-seed", seq: seq(1), time: now - 2 * H + 1, data: {} },
+			usage(now - 1 * H, 2, 1, 13, 0, 5),
+			{ type: "turn/end", seq: seq(3), time: now - 1 * H + 1 },
+		];
+		for (let i = 1; i < plainLines.length; i++) plainLines[i].seq = seq(i - 1);
+		writeLog(plainDir, plainLines);
+		const plainState = newSessionState("sess-plain");
+		for (const line of plainLines.slice(1)) {
+			// fold the full stream exactly as a non-seeded backfill would
+			const { foldEvent } = module._internal;
+			foldEvent(plainState, line);
+		}
+		assert.equal(plainState.totals.uncached, 24, "bare end-seed {} does not cut an unseeded session");
+		assert.equal(resolveInheritedCut({ isSeeded: false }, plainLines.slice(1)), 0, "unseeded header → no inherited cut");
+		assert.equal(resolveInheritedCut({ isSeeded: true }, [{ type: "session/end-seed", data: {} }]), 0, "seeded header without an inherited marker → no cut (safe fallback)");
+		const sessions2 = new Map();
+		// backfillAll expects root/<project>/<session-dir>/<file>, so scan `root`.
+		backfillAll(sessions2, root, 600, { info: () => {}, warn: () => {} });
+		const plain2 = sessions2.get("sess-plain");
+		assert.equal(plain2.seeded, false, "plain session not marked seeded");
+		assert.equal(plain2.totals.uncached, 24, "plain session keeps every event");
+		ok("unseeded session keeps its full history; bare end-seed {} is not a cut");
+
+		// ── 3c. legacy v0 format: seedLength is a SEQ BOUND, not an event count ──
+		// v0 drops some events, so the file holds far fewer events than seedLength
+		// and seqs keep the parent's numbering with gaps. Treating seedLength as an
+		// array index would skip the entire child's own history.
+		const v0Dir = join(root, "proj", "sess-v0");
+		const v0Lines = [
+			{ type: "session", version: 0, id: "sess-v0", createdAt: now - 2 * H, cwd: "C:\\z", parentSession: "sess-parent", seedLength: 4000, delegationDepth: 0, agentPreset: "standard" },
+			// inherited prefix (seq < 4000, gapped like real v0 logs)
+			{ ...usage(now - 2 * H, 5, 1, 5000, 0, 900), seq: 12 },
+			{ type: "turn/end", seq: 90, time: now - 2 * H + 5 },
+			{ ...usage(now - 2 * H + 50, 6, 1, 7000, 0, 1100), seq: 3999 },
+			{ type: "turn/end", seq: 3999, time: now - 2 * H + 60 },
+			// the child's own suffix (seq >= 4000)
+			{ ...usage(now - 1 * H, 7, 1, 123, 0, 45), seq: 4000 },
+			{ type: "turn/end", seq: 4001, time: now - 1 * H + 5 },
+		];
+		writeLog(v0Dir, v0Lines, "session.v3.jsonl.zstd");
+		const v0Parsed = readHeaderAndEvents(join(v0Dir, "session.v3.jsonl.zstd"), { warn: () => {} });
+		assert.equal(v0Parsed.isSeeded, true, "v0 seedLength header detected as seeded");
+		assert.equal(v0Parsed.inheritedCut, 4, `v0 cut lands at the first seq >= seedLength (got ${v0Parsed.inheritedCut})`);
+		const sessions3 = new Map();
+		backfillAll(sessions3, root, 600, { info: () => {}, warn: () => {} });
+		const v0State = sessions3.get("sess-v0");
+		assert.ok(v0State, "v0 fork folded");
+		assert.equal(v0State.totals.uncached, 123, `v0: only the suffix after seedLength is counted (got ${v0State.totals.uncached})`);
+		assert.equal(v0State.totals.output, 45, `v0: inherited output excluded (got ${v0State.totals.output})`);
+		// A naive "skip seedLength events" reading would wipe the child entirely.
+		assert.ok(v0State.totals.uncached > 0, "v0 child keeps its own history (seedLength must not be used as an event count)");
+		ok("v0 fork: seedLength used as a seq bound, child history preserved");
+
+		// ── 3d. fold-version bump forces a refold ──
+		// The backfill idempotence guard is mtime-based; without a version stamp a
+		// session folded under the old (double-counting) rule would never be
+		// recomputed, so restarting would not fix anything.
+		assert.equal(module._internal.FOLD_VERSION >= 2, true, "FOLD_VERSION bumped for the fork fix");
+		const stale = newSessionState("sess-child");
+		stale.sourceMtime = v0Parsed.mtimeMs + 10_000; // newer mtime → normally skipped
+		stale.foldVersion = 1;                          // folded by the old rule
+		const rerun = new Map([["sess-child", stale]]);
+		const r2 = module._internal.backfillOne(rerun, join(childDir, "session.v4.jsonl.zstd"), 600, { warn: () => {} });
+		assert.equal(r2.folded, true, "stale fold version forces a refold despite an unchanged mtime");
+		assert.equal(rerun.get("sess-child").totals.uncached, 100, "refold applies the corrected fork rule");
+		assert.equal(rerun.get("sess-child").foldVersion, module._internal.FOLD_VERSION, "refolded state carries the current version");
+		ok("fold-version bump forces old states to be recomputed");
+
+		// ── 3e. ranking impact: the child must no longer dominate its parent ──
+		// `sessions3` scanned the whole fixture tree, so it holds child + plain + v0.
+		const wt = aggregateWindowTotals(sessions3);
+		const childBurn = child.totals.uncached + child.totals.cacheRead + child.totals.cacheWrite + child.totals.output;
+		// 100 (child own) + 24 (plain) + 123 (v0 child own) = 247; the 5000+7000
+		// inherited tokens must never appear.
+		assert.equal(wt.all.uncached, 247, `window totals exclude every inherited prefix (got ${wt.all.uncached})`);
+		assert.ok(childBurn < 4000, `child burn ${childBurn} is far below the inherited prefix it used to absorb`);
+
+		rmSync(root, { recursive: true, force: true });
+	} catch (err) {
+		bad("fork/seed double counting", err);
+	}
+}
+
+// ── 4. backfill: replay a real durable session log ───────────────────────────
+console.log("[4] backfill against a real session log");
 try {
 	const liveHome = join(homedir(), ".dsh");
 	const liveSessions = join(liveHome, "sessions");

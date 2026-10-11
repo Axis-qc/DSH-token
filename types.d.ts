@@ -50,12 +50,20 @@ export interface TokenDashboardHourSample {
 export interface TokenDashboardSession {
   id: string;
   totals: TokenDashboardTotals;
-  /** 推导出的标签：第一条真实用户消息的文本，会被截断；没有则为 null。 */
+  /** 推导出的标签：第一条真实用户消息的文本，会被截断；没有则为 null。
+   *  对 fork 子会话而言，这是子会话自己的首条用户消息——继承前缀被排除，
+   *  因此不会取到父会话的开头。 */
   title: string | null;
   /** 会话头中的 agent 预设 id（`standard`/`code`/…），若有。 */
   preset: string | null;
   /** 会话头中的创建时间，毫秒时间戳；未知时为 null。 */
   createdAt: number | null;
+  /** 是否为 fork/seed 出的子会话（头部带 `isSeeded` 或旧格式 `seedLength`）。
+   *  这类会话的日志物理复制了父会话的历史事件，`totals`/`series` 只统计
+   *  该会话自身的消耗，继承前缀已排除，因此与父会话不重复计数。 */
+  seeded: boolean;
+  /** 被跳过的继承前缀事件条数（非 seeded 会话为 0）。用于 UI 说明。 */
+  inheritedEvents: number;
   stats: { turns: number; steps: number } | null;
   context: { pressureTokens?: number; projectedTokens?: number; contextWindow?: number } | null;
   series: TokenDashboardHourSample[];

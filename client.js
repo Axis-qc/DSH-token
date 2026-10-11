@@ -517,6 +517,15 @@ window.__ModuleLoader__.load({
 			"  min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;",
 			"}",
 			"dsh-token-dashboard .tdb-rtotal{ margin-left: auto; font-family: var(--tdb-mono); font-size: 11.5px; color: var(--tdb-accent-ctx); white-space: nowrap; }",
+			// fork 子会话角标：提醒该行只统计子会话自身的消耗，
+			// 继承自父会话的历史前缀已被排除，不与父会话重复计数。
+			"dsh-token-dashboard .tdb-rtag{",
+			"  flex: none; font-size: 9px; line-height: 1; padding: 2px 4px; border-radius: 3px;",
+			"  font-family: var(--tdb-mono); color: var(--tdb-accent-out);",
+			"  border: 1px solid color-mix(in srgb, var(--tdb-accent-out) 45%, transparent);",
+			"  background: color-mix(in srgb, var(--tdb-accent-out) 12%, transparent);",
+			"  cursor: help;",
+			"}",
 			"dsh-token-dashboard .tdb-rpct{ font-family: var(--tdb-mono); font-size: 10.5px; color: var(--tdb-accent-in); white-space: nowrap; }",
 			"dsh-token-dashboard .tdb-rbar{ height: 2px; background: var(--tdb-bg-chart); border-radius: 2px; overflow: hidden; }",
 			"dsh-token-dashboard .tdb-rbar i{",
@@ -1159,9 +1168,19 @@ window.__ModuleLoader__.load({
 					var t = row.t;
 					var share = grand > 0 ? (row.v / grand) * 100 : 0;
 					var calls = typeof t.calls === "number" ? t.calls : null;
+					// fork/seed 子会话：服务端只统计该会话自身的用量，继承自
+					// 父会话的历史前缀不计入，因此与父会话不重复；加角标说明，
+					// 否则用户会觉得「子会话怎么这么小」或反过来误读排名。
+					var isFork = s.seeded === true;
+					var forkNote = isFork
+						? "\n⚠ fork 子会话：仅统计该会话自身消耗，继承自父会话的 " +
+						  (s.inheritedEvents > 0 ? s.inheritedEvents + " 条历史事件" : "历史前缀") +
+						  "已排除（不与父会话重复计数）"
+						: "";
 					var tip = "会话 ID: " + s.id +
 						(s.cwd ? "\n目录: " + s.cwd : "") +
 						(s.preset ? "\n预设: " + s.preset : "") +
+						forkNote +
 						"\n输入 " + fmt(t.uncached) + " / 缓存读 " + fmt(t.cacheRead) +
 						" / 缓存写 " + (noCw ? "未上报" : fmt(t.cacheWrite)) +
 						" / 输出 " + fmt(t.output) +
@@ -1172,6 +1191,7 @@ window.__ModuleLoader__.load({
 						'<div class="tdb-rtop">' +
 						'<span class="tdb-rrank">#' + (r + 1) + '</span>' +
 						'<span class="tdb-rname">' + esc(sessionLabel(s, row.idx)) + '</span>' +
+						(isFork ? '<span class="tdb-rtag" title="' + esc(forkNote.trim()) + '">fork</span>' : '') +
 						'<span class="tdb-rtotal" title="总消耗（输入 + 缓存读写 + 输出）">' + fmt(row.v) + ' tok</span>' +
 						'<span class="tdb-rpct">' + share.toFixed(1) + '%</span>' +
 						'</div>' +

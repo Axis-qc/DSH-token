@@ -1,6 +1,6 @@
 {
   "name": "dsh-token-dashboard",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Collapsible live token dashboard for the DSH web GUI: token totals, cache hit rate, context occupancy, and per-turn usage trends.",
   "type": "module",
   "main": "index.js",
